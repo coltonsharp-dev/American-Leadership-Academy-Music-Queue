@@ -48,6 +48,7 @@ const el = {
   btnNextQueue: document.getElementById("btnNextQueue"),
   btnPlayApproved: document.getElementById("btnPlayApproved"),
   btnAddApprovedToQueue: document.getElementById("btnAddApprovedToQueue"),
+  btnVerifyPlaylistAccess: document.getElementById("btnVerifyPlaylistAccess"),
 
   status: document.getElementById("status"),
   nowPlaying: document.getElementById("nowPlaying"),
