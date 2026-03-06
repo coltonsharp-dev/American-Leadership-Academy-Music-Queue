@@ -7,12 +7,14 @@
     content="width=device-width, initial-scale=1.0"
   />
   <title>ALA Music Queue</title>
+
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
     href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
     rel="stylesheet"
   />
+
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -24,15 +26,21 @@
             <p class="eyebrow">American Leadership Academy</p>
             <h1>Music Queue Dashboard</h1>
             <p class="hero-sub">
-              Review student song requests, verify the artwork, approve clean tracks,
+              Review student song requests, verify album art, approve clean tracks,
               and control the live queue with confidence.
             </p>
           </div>
 
           <div class="hero-actions">
-            <button id="btnLogin" class="btn btn-primary">Login to Spotify</button>
-            <button id="btnLogout" class="btn">Logout</button>
-            <button id="btnLoadRequests" class="btn">Load Requests</button>
+            <button id="btnLogin" class="btn btn-primary" type="button">
+              Login to Spotify
+            </button>
+            <button id="btnLogout" class="btn" type="button">
+              Logout
+            </button>
+            <button id="btnLoadRequests" class="btn" type="button">
+              Load Requests
+            </button>
           </div>
         </div>
 
@@ -45,14 +53,24 @@
             <p class="section-kicker">Live Playback</p>
             <h2>Now Playing</h2>
           </div>
-          <button id="btnRefreshPlayback" class="btn btn-small">Refresh</button>
+
+          <button id="btnRefreshPlayback" class="btn btn-small" type="button">
+            Refresh
+          </button>
         </div>
 
         <div class="media-card media-card-large">
-          <img id="nowPlayingArt" class="media-art large" alt="Now playing artwork" />
+          <img
+            id="nowPlayingArt"
+            class="media-art large"
+            src=""
+            alt="Now playing artwork"
+          />
           <div class="media-copy">
             <div id="nowPlaying" class="media-title">Nothing currently loaded</div>
-            <div id="nowPlayingMeta" class="media-meta">Waiting for playback data...</div>
+            <div id="nowPlayingMeta" class="media-meta">
+              Waiting for playback data...
+            </div>
           </div>
         </div>
       </section>
@@ -65,13 +83,22 @@
           </div>
 
           <div class="queue-nav">
-            <button id="btnPrevQueue" class="btn btn-small">Prev</button>
-            <button id="btnNextQueue" class="btn btn-small">Next</button>
+            <button id="btnPrevQueue" class="btn btn-small" type="button">
+              Prev
+            </button>
+            <button id="btnNextQueue" class="btn btn-small" type="button">
+              Next
+            </button>
           </div>
         </div>
 
         <div class="media-card">
-          <img id="upNextArt" class="media-art" alt="Up next artwork" />
+          <img
+            id="upNextArt"
+            class="media-art"
+            src=""
+            alt="Up next artwork"
+          />
           <div class="media-copy">
             <div id="upNext" class="media-title">No approved songs yet</div>
             <div class="media-meta">Approved selection preview</div>
@@ -79,8 +106,12 @@
         </div>
 
         <div class="control-row">
-          <button id="btnPlayApproved" class="btn btn-primary">Play Approved</button>
-          <button id="btnAddApprovedToQueue" class="btn">Add Approved to Queue</button>
+          <button id="btnPlayApproved" class="btn btn-primary" type="button">
+            Play Approved
+          </button>
+          <button id="btnAddApprovedToQueue" class="btn" type="button">
+            Add Approved to Queue
+          </button>
         </div>
       </section>
 
@@ -92,7 +123,9 @@
           </div>
         </div>
 
-        <div id="approvedQueueList" class="queue-list"></div>
+        <div id="approvedQueueList" class="queue-list">
+          <div class="empty-state">No approved songs yet.</div>
+        </div>
       </section>
 
       <section class="card requests-card">
@@ -102,14 +135,21 @@
             <h2>Unapproved Student Requests</h2>
           </div>
 
-          <label class="toggle-row">
+          <label class="toggle-row" for="hideExplicitOnly">
             <input type="checkbox" id="hideExplicitOnly" />
             <span>Hide explicit</span>
           </label>
         </div>
 
-        <div id="requestSummary" class="summary-text"></div>
-        <div id="requestTableBody" class="requests-list"></div>
+        <div id="requestSummary" class="summary-text">
+          Loaded 0 request(s) | Valid Spotify links: 0 | Clean: 0 | Explicit: 0 | Errors: 0
+        </div>
+
+        <div id="requestTableBody" class="requests-list">
+          <div class="empty-state">
+            No unapproved requests available yet.
+          </div>
+        </div>
       </section>
     </main>
   </div>
