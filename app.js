@@ -1,9 +1,11 @@
-// ===============================
-// ALA Music Requester - app.js
-// GitHub Pages + Spotify PKCE + Google Sheets CSV
-// ===============================
+// ======================================================
+// ALA Music Requester
+// app.js
+// ======================================================
 
-// ---------- CONFIG ----------
+// --------------------
+// CONFIG
+// --------------------
 const CONFIG = {
   clientId: "cbfd828db1414a2183039d01ceeaf181",
   redirectUri: "https://coltonsharp-dev.github.io/American-Leadership-Academy-Music-Queue/",
@@ -16,21 +18,25 @@ const CONFIG = {
     "playlist-modify-public",
     "playlist-modify-private"
   ],
-  pollPlaybackMs: 15000
+  playbackPollMs: 15000
 };
 
-// ---------- STORAGE KEYS ----------
+// --------------------
+// LOCAL STORAGE KEYS
+// --------------------
 const LS = {
   pkceVerifier: "ala_pkce_verifier",
-  accessToken: "ala_spotify_access_token",
-  refreshToken: "ala_spotify_refresh_token",
-  expiresAt: "ala_spotify_expires_at",
+  accessToken: "ala_access_token",
+  refreshToken: "ala_refresh_token",
+  expiresAt: "ala_expires_at",
   approvedQueue: "ala_approved_queue",
-  queuePointer: "ala_queue_pointer",
-  rejectedIds: "ala_rejected_request_ids"
+  rejectedIds: "ala_rejected_ids",
+  queuePointer: "ala_queue_pointer"
 };
 
-// ---------- DOM ----------
+// --------------------
+// DOM
+// --------------------
 const el = {
   btnLogin: document.getElementById("btnLogin"),
   btnLogout: document.getElementById("btnLogout"),
@@ -52,14 +58,27 @@ const el = {
   approvedQueueList: document.getElementById("approvedQueueList")
 };
 
-// ---------- STATE ----------
+// --------------------
+// STATE
+// --------------------
 let currentRequests = [];
-let playbackPollTimer = null;
+let playbackTimer = null;
 
-// ---------- UTIL ----------
+// ======================================================
+// BASIC HELPERS
+// ======================================================
 function setStatus(message) {
   if (el.status) el.status.textContent = message;
   console.log(message);
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 function safeJsonParse(value, fallback) {
@@ -70,65 +89,18 @@ function safeJsonParse(value, fallback) {
   }
 }
 
-function getApprovedQueue() {
-  return safeJsonParse(localStorage.getItem(LS.approvedQueue), []);
-}
-
-function saveApprovedQueue(queue) {
-  localStorage.setItem(LS.approvedQueue, JSON.stringify(queue));
-}
-
-function getRejectedIds() {
-  return new Set(safeJsonParse(localStorage.getItem(LS.rejectedIds), []));
-}
-
-function saveRejectedIds(setObj) {
-  localStorage.setItem(LS.rejectedIds, JSON.stringify([...setObj]));
-}
-
-function getQueuePointer() {
-  const n = Number(localStorage.getItem(LS.queuePointer));
-  return Number.isFinite(n) && n >= 0 ? n : 0;
-}
-
-function setQueuePointer(idx) {
-  localStorage.setItem(LS.queuePointer, String(idx));
-}
-
-function clampQueuePointer() {
-  const queue = getApprovedQueue();
-  const maxIdx = Math.max(0, queue.length - 1);
-  const idx = Math.min(getQueuePointer(), maxIdx);
-  setQueuePointer(idx);
-  return idx;
-}
-
-function escapeHtml(str) {
-  return String(str ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
 function msToMinSec(ms) {
-  const total = Math.floor(Number(ms || 0) / 1000);
-  const min = Math.floor(total / 60);
-  const sec = total % 60;
+  const totalSeconds = Math.floor(Number(ms || 0) / 1000);
+  const min = Math.floor(totalSeconds / 60);
+  const sec = totalSeconds % 60;
   return `${min}:${String(sec).padStart(2, "0")}`;
 }
 
-function minutesDecimalToMinSec(minutesVal) {
-  const n = Number(minutesVal);
-  if (!Number.isFinite(n)) return "—";
-  const totalSec = Math.round(n * 60);
-  const min = Math.floor(totalSec / 60);
-  const sec = totalSec % 60;
-  return `${min}:${String(sec).padStart(2, "0")}`;
+function spotifyTrackUrl(trackId) {
+  return `https://open.spotify.com/track/${trackId}`;
 }
 
-function makeRequestId(row) {
+function buildRequestId(row) {
   return [
     row.timestamp || "",
     row.email || "",
@@ -138,36 +110,77 @@ function makeRequestId(row) {
   ].join("|");
 }
 
-function extractSpotifyTrackId(url) {
-  if (!url) return null;
-  const trimmed = String(url).trim();
+// ======================================================
+// STORAGE HELPERS
+// ======================================================
+function ensureStorageDefaults() {
+  if (!localStorage.getItem(LS.approvedQueue)) {
+    localStorage.setItem(LS.approvedQueue, JSON.stringify([]));
+  }
 
-  const m1 = trimmed.match(/spotify\.com\/track\/([A-Za-z0-9]+)/i);
-  if (m1) return m1[1];
+  if (!localStorage.getItem(LS.rejectedIds)) {
+    localStorage.setItem(LS.rejectedIds, JSON.stringify([]));
+  }
 
-  const m2 = trimmed.match(/spotify:track:([A-Za-z0-9]+)/i);
-  if (m2) return m2[1];
-
-  return null;
+  if (!localStorage.getItem(LS.queuePointer)) {
+    localStorage.setItem(LS.queuePointer, "0");
+  }
 }
 
-function spotifyTrackUrl(trackId) {
-  return `https://open.spotify.com/track/${trackId}`;
+function getApprovedQueue() {
+  const stored = localStorage.getItem(LS.approvedQueue);
+
+  if (!stored) {
+    localStorage.setItem(LS.approvedQueue, JSON.stringify([]));
+    return [];
+  }
+
+  const parsed = safeJsonParse(stored, []);
+  return Array.isArray(parsed) ? parsed : [];
 }
 
-function spotifyPlaylistUrl(playlistId) {
-  return `https://open.spotify.com/playlist/${playlistId}`;
+function saveApprovedQueue(queue) {
+  localStorage.setItem(LS.approvedQueue, JSON.stringify(queue));
 }
 
-function requestLooksClean(trackObj) {
-  return trackObj && trackObj.explicit === false;
+function getRejectedIds() {
+  const stored = safeJsonParse(localStorage.getItem(LS.rejectedIds), []);
+  return new Set(Array.isArray(stored) ? stored : []);
 }
 
-// ---------- CSV PARSER ----------
+function saveRejectedIds(setObj) {
+  localStorage.setItem(LS.rejectedIds, JSON.stringify([...setObj]));
+}
+
+function getQueuePointer() {
+  const raw = Number(localStorage.getItem(LS.queuePointer));
+  return Number.isFinite(raw) && raw >= 0 ? raw : 0;
+}
+
+function setQueuePointer(index) {
+  localStorage.setItem(LS.queuePointer, String(Math.max(0, index)));
+}
+
+function clampQueuePointer() {
+  const queue = getApprovedQueue();
+  if (!queue.length) {
+    setQueuePointer(0);
+    return 0;
+  }
+
+  const current = getQueuePointer();
+  const clamped = Math.min(current, queue.length - 1);
+  setQueuePointer(clamped);
+  return clamped;
+}
+
+// ======================================================
+// CSV PARSER
+// ======================================================
 function parseCSV(text) {
   const rows = [];
   let row = [];
-  let cur = "";
+  let current = "";
   let inQuotes = false;
 
   for (let i = 0; i < text.length; i++) {
@@ -175,7 +188,7 @@ function parseCSV(text) {
     const next = text[i + 1];
 
     if (ch === '"' && inQuotes && next === '"') {
-      cur += '"';
+      current += '"';
       i++;
       continue;
     }
@@ -186,43 +199,63 @@ function parseCSV(text) {
     }
 
     if (ch === "," && !inQuotes) {
-      row.push(cur);
-      cur = "";
+      row.push(current);
+      current = "";
       continue;
     }
 
     if ((ch === "\n" || ch === "\r") && !inQuotes) {
-      if (cur.length || row.length) {
-        row.push(cur);
+      if (current.length || row.length) {
+        row.push(current);
         rows.push(row);
         row = [];
-        cur = "";
+        current = "";
       }
       continue;
     }
 
-    cur += ch;
+    current += ch;
   }
 
-  if (cur.length || row.length) {
-    row.push(cur);
+  if (current.length || row.length) {
+    row.push(current);
     rows.push(row);
   }
 
   return rows;
 }
 
-// ---------- PKCE ----------
+// ======================================================
+// SPOTIFY LINK PARSER
+// ======================================================
+function extractSpotifyTrackId(url) {
+  if (!url) return null;
+
+  const trimmed = String(url).trim();
+
+  const trackUrlMatch = trimmed.match(/spotify\.com\/track\/([A-Za-z0-9]+)/i);
+  if (trackUrlMatch) return trackUrlMatch[1];
+
+  const spotifyUriMatch = trimmed.match(/spotify:track:([A-Za-z0-9]+)/i);
+  if (spotifyUriMatch) return spotifyUriMatch[1];
+
+  return null;
+}
+
+// ======================================================
+// PKCE AUTH HELPERS
+// ======================================================
 function randomString(length = 64) {
   const chars =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
-  const array = new Uint8Array(length);
-  crypto.getRandomValues(array);
-  let out = "";
-  for (let i = 0; i < length; i++) {
-    out += chars[array[i] % chars.length];
+  const bytes = new Uint8Array(length);
+  crypto.getRandomValues(bytes);
+
+  let result = "";
+  for (let i = 0; i < bytes.length; i++) {
+    result += chars[bytes[i] % chars.length];
   }
-  return out;
+  return result;
 }
 
 async function sha256(plain) {
@@ -243,9 +276,12 @@ async function createCodeChallenge(verifier) {
   return base64UrlEncode(digest);
 }
 
-// ---------- AUTH ----------
+// ======================================================
+// SPOTIFY AUTH
+// ======================================================
 async function loginToSpotify() {
   setStatus("Starting Spotify login...");
+
   const verifier = randomString(64);
   const challenge = await createCodeChallenge(verifier);
   localStorage.setItem(LS.pkceVerifier, verifier);
@@ -262,7 +298,7 @@ async function loginToSpotify() {
   window.location.href = `https://accounts.spotify.com/authorize?${params.toString()}`;
 }
 
-async function handleAuthCallback() {
+async function handleSpotifyCallback() {
   const url = new URL(window.location.href);
   const code = url.searchParams.get("code");
   const error = url.searchParams.get("error");
@@ -290,7 +326,7 @@ async function handleAuthCallback() {
     code_verifier: verifier
   });
 
-  const res = await fetch("https://accounts.spotify.com/api/token", {
+  const response = await fetch("https://accounts.spotify.com/api/token", {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded"
@@ -298,12 +334,13 @@ async function handleAuthCallback() {
     body
   });
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Token exchange failed: ${res.status} ${text}`);
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Token exchange failed: ${response.status} ${text}`);
   }
 
-  const json = await res.json();
+  const json = await response.json();
+
   localStorage.setItem(LS.accessToken, json.access_token);
   if (json.refresh_token) {
     localStorage.setItem(LS.refreshToken, json.refresh_token);
@@ -320,10 +357,12 @@ async function handleAuthCallback() {
 }
 
 async function getAccessToken() {
-  const token = localStorage.getItem(LS.accessToken);
+  const accessToken = localStorage.getItem(LS.accessToken);
   const expiresAt = Number(localStorage.getItem(LS.expiresAt) || "0");
 
-  if (token && Date.now() < expiresAt) return token;
+  if (accessToken && Date.now() < expiresAt) {
+    return accessToken;
+  }
 
   const refreshToken = localStorage.getItem(LS.refreshToken);
   if (!refreshToken) return null;
@@ -334,7 +373,7 @@ async function getAccessToken() {
     refresh_token: refreshToken
   });
 
-  const res = await fetch("https://accounts.spotify.com/api/token", {
+  const response = await fetch("https://accounts.spotify.com/api/token", {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded"
@@ -342,13 +381,13 @@ async function getAccessToken() {
     body
   });
 
-  if (!res.ok) {
-    const text = await res.text();
-    console.error(text);
+  if (!response.ok) {
+    const text = await response.text();
+    console.error("Refresh failed:", text);
     return null;
   }
 
-  const json = await res.json();
+  const json = await response.json();
   localStorage.setItem(LS.accessToken, json.access_token);
   localStorage.setItem(
     LS.expiresAt,
@@ -366,14 +405,16 @@ function logoutSpotify() {
   setStatus("Logged out of Spotify.");
 }
 
-// ---------- SPOTIFY API ----------
+// ======================================================
+// SPOTIFY API
+// ======================================================
 async function spotifyFetch(path, options = {}) {
   const token = await getAccessToken();
   if (!token) {
     throw new Error("Spotify login required.");
   }
 
-  const res = await fetch(`https://api.spotify.com/v1${path}`, {
+  const response = await fetch(`https://api.spotify.com/v1${path}`, {
     ...options,
     headers: {
       Authorization: `Bearer ${token}`,
@@ -382,14 +423,14 @@ async function spotifyFetch(path, options = {}) {
     }
   });
 
-  if (res.status === 204) return null;
+  if (response.status === 204) return null;
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`${res.status} ${text}`);
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`${response.status} ${text}`);
   }
 
-  return res.json();
+  return response.json();
 }
 
 async function getTrackById(trackId) {
@@ -399,8 +440,8 @@ async function getTrackById(trackId) {
 async function getCurrentlyPlaying() {
   try {
     return await spotifyFetch("/me/player/currently-playing");
-  } catch (err) {
-    console.warn("currently-playing error", err);
+  } catch (error) {
+    console.warn("Currently playing unavailable:", error);
     return null;
   }
 }
@@ -421,16 +462,16 @@ async function addTrackToSpotifyQueue(trackUri) {
   const url = new URL("https://api.spotify.com/v1/me/player/queue");
   url.searchParams.set("uri", trackUri);
 
-  const res = await fetch(url.toString(), {
+  const response = await fetch(url.toString(), {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`
     }
   });
 
-  if (!res.ok && res.status !== 204) {
-    const text = await res.text();
-    throw new Error(`${res.status} ${text}`);
+  if (!response.ok && response.status !== 204) {
+    const text = await response.text();
+    throw new Error(`${response.status} ${text}`);
   }
 }
 
@@ -438,7 +479,7 @@ async function playTrackNow(trackUri) {
   const token = await getAccessToken();
   if (!token) throw new Error("Spotify login required.");
 
-  const res = await fetch("https://api.spotify.com/v1/me/player/play", {
+  const response = await fetch("https://api.spotify.com/v1/me/player/play", {
     method: "PUT",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -449,211 +490,256 @@ async function playTrackNow(trackUri) {
     })
   });
 
-  if (!res.ok && res.status !== 204) {
-    const text = await res.text();
-    throw new Error(`${res.status} ${text}`);
+  if (!response.ok && response.status !== 204) {
+    const text = await response.text();
+    throw new Error(`${response.status} ${text}`);
   }
 }
 
-// ---------- GOOGLE SHEET REQUESTS ----------
-async function fetchRequestRows() {
-  const url = `${CONFIG.requestsCsvUrl}${CONFIG.requestsCsvUrl.includes("?") ? "&" : "?"}t=${Date.now()}`;
-  const res = await fetch(url);
+// ======================================================
+// GOOGLE SHEET REQUEST LOADING
+// Column mapping:
+// A = Timestamp
+// B = Email Address
+// C = Spotify track link
+// D = Artist name
+// E = Song name
+// F = Score (ignored)
+// ======================================================
+async function fetchStudentRequestRows() {
+  const url =
+    `${CONFIG.requestsCsvUrl}${CONFIG.requestsCsvUrl.includes("?") ? "&" : "?"}t=${Date.now()}`;
 
-  if (!res.ok) {
-    throw new Error(`Failed to fetch Google Sheet CSV: ${res.status}`);
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch Google Sheet CSV: ${response.status}`);
   }
 
-  const text = await res.text();
+  const text = await response.text();
   const rows = parseCSV(text);
 
   if (!rows.length) return [];
 
-  // Expected screenshot columns:
-  // A Timestamp
-  // B Email Address
-  // C Spotify link
-  // D Artist name
-  // E Song name
-  return rows.slice(1).filter(r => r.some(cell => String(cell).trim() !== "")).map((r) => ({
-    timestamp: (r[0] || "").trim(),
-    email: (r[1] || "").trim(),
-    spotifyLink: (r[2] || "").trim(),
-    artistInput: (r[3] || "").trim(),
-    songInput: (r[4] || "").trim()
-  }));
+  return rows
+    .slice(1)
+    .filter((row) => row.some((cell) => String(cell || "").trim() !== ""))
+    .map((row) => ({
+      timestamp: (row[0] || "").trim(),
+      email: (row[1] || "").trim(),
+      spotifyLink: (row[2] || "").trim(),
+      artistInput: (row[3] || "").trim(),
+      songInput: (row[4] || "").trim()
+    }));
 }
 
-async function enrichRequests(rows) {
-  const rejectedIds = getRejectedIds();
+async function enrichRequestRows(rows) {
+  const rejected = getRejectedIds();
   const enriched = [];
 
   for (const row of rows) {
-    const requestId = makeRequestId(row);
+    const requestId = buildRequestId(row);
     const trackId = extractSpotifyTrackId(row.spotifyLink);
 
-    const base = {
+    const result = {
       ...row,
       requestId,
       trackId,
-      rejected: rejectedIds.has(requestId),
+      rejected: rejected.has(requestId),
       spotify: null,
       error: null
     };
 
     if (!trackId) {
-      base.error = "Invalid or missing Spotify track link";
-      enriched.push(base);
+      result.error = "Invalid or missing Spotify track link";
+      enriched.push(result);
       continue;
     }
 
     try {
       const track = await getTrackById(trackId);
-      base.spotify = {
+
+      result.spotify = {
         id: track.id,
         uri: track.uri,
         name: track.name,
-        artist: track.artists?.map(a => a.name).join(", ") || "",
+        artist: track.artists?.map((a) => a.name).join(", ") || "",
         explicit: track.explicit,
         durationMs: track.duration_ms,
         externalUrl: track.external_urls?.spotify || spotifyTrackUrl(track.id),
         album: track.album?.name || ""
       };
-    } catch (err) {
-      base.error = err.message;
+    } catch (error) {
+      result.error = error.message || "Spotify lookup failed";
     }
 
-    enriched.push(base);
+    enriched.push(result);
   }
 
   return enriched;
 }
 
-// ---------- RENDER REQUESTS ----------
+// ======================================================
+// REQUEST SUMMARY + BADGES
+// ======================================================
+function isApproved(requestId) {
+  const queue = getApprovedQueue();
+  return queue && queue.some((item) => item.requestId === requestId);
+}
+
 function buildRequestSummary(requests) {
   const total = requests.length;
-  const valid = requests.filter(r => r.spotify).length;
-  const clean = requests.filter(r => r.spotify && r.spotify.explicit === false).length;
-  const explicit = requests.filter(r => r.spotify && r.spotify.explicit === true).length;
-  const broken = requests.filter(r => !r.spotify).length;
+  const valid = requests.filter((r) => !!r.spotify).length;
+  const clean = requests.filter((r) => r.spotify && r.spotify.explicit === false).length;
+  const explicit = requests.filter((r) => r.spotify && r.spotify.explicit === true).length;
+  const errors = requests.filter((r) => !r.spotify).length;
 
   el.requestSummary.textContent =
-    `Loaded ${total} request(s) | Valid Spotify links: ${valid} | Clean: ${clean} | Explicit: ${explicit} | Errors: ${broken}`;
+    `Loaded ${total} request(s) | Valid Spotify links: ${valid} | Clean: ${clean} | Explicit: ${explicit} | Errors: ${errors}`;
 }
 
-function isApproved(requestId) {
-  return getApprovedQueue().some(item => item.requestId === requestId);
+function getStatusBadgeHtml(request) {
+  if (request.spotify && request.spotify.explicit === false) {
+    return `<span class="badge clean">🟢 Clean</span>`;
+  }
+
+  if (request.spotify && request.spotify.explicit === true) {
+    return `<span class="badge explicit">🔴 Explicit</span>`;
+  }
+
+  return `<span class="badge error">⚠️ Error</span>`;
 }
 
-function approveRequest(requestObj) {
-  if (!requestObj.spotify || requestObj.spotify.explicit) return;
+// ======================================================
+// APPROVE / REJECT
+// ======================================================
+function approveRequest(request) {
+  if (!request.spotify) {
+    setStatus("Cannot approve a request with no valid Spotify track.");
+    return;
+  }
+
+  if (request.spotify.explicit) {
+    setStatus("Cannot approve an explicit song.");
+    return;
+  }
 
   const queue = getApprovedQueue();
-  if (queue.some(item => item.requestId === requestObj.requestId)) {
+
+  if (queue.some((item) => item.requestId === request.requestId)) {
     setStatus("Song is already approved.");
     return;
   }
 
   queue.push({
-    requestId: requestObj.requestId,
-    timestamp: requestObj.timestamp,
-    requestedArtist: requestObj.artistInput,
-    requestedSong: requestObj.songInput,
-    spotifyLink: requestObj.spotifyLink,
-    spotify: requestObj.spotify
+    requestId: request.requestId,
+    timestamp: request.timestamp,
+    email: request.email,
+    requestedArtist: request.artistInput,
+    requestedSong: request.songInput,
+    spotifyLink: request.spotifyLink,
+    spotify: request.spotify
   });
 
   saveApprovedQueue(queue);
   renderApprovedQueue();
   renderRequests(currentRequests);
-  setStatus(`Approved: ${requestObj.spotify.artist} — ${requestObj.spotify.name}`);
+
+  setStatus(`Approved: ${request.spotify.artist} — ${request.spotify.name}`);
 }
 
-function rejectRequest(requestObj) {
+function rejectRequest(request) {
   const rejected = getRejectedIds();
-  rejected.add(requestObj.requestId);
+  rejected.add(request.requestId);
   saveRejectedIds(rejected);
   renderRequests(currentRequests);
-  setStatus("Request hidden.");
+  setStatus("Request removed from unapproved list.");
 }
 
 function removeApproved(requestId) {
-  const queue = getApprovedQueue().filter(item => item.requestId !== requestId);
+  const queue = getApprovedQueue().filter((item) => item.requestId !== requestId);
   saveApprovedQueue(queue);
   clampQueuePointer();
   renderApprovedQueue();
   renderRequests(currentRequests);
   updateUpNext();
-  setStatus("Removed approved song.");
+  setStatus("Removed song from approved list.");
 }
 
+// ======================================================
+// RENDER UNAPPROVED REQUESTS
+// ======================================================
 function renderRequests(requests) {
-  const hideExplicit = el.hideExplicitOnly.checked;
-  const rejectedIds = getRejectedIds();
+  const hideExplicit = !!el.hideExplicitOnly?.checked;
+  const rejected = getRejectedIds();
 
-  const visible = requests.filter((r) => {
-    if (rejectedIds.has(r.requestId)) return false;
-    if (hideExplicit && r.spotify && r.spotify.explicit === true) return false;
+  const visibleRequests = requests.filter((request) => {
+    if (rejected.has(request.requestId)) return false;
+    if (isApproved(request.requestId)) return false;
+    if (hideExplicit && request.spotify && request.spotify.explicit === true) return false;
     return true;
   });
 
-  if (!visible.length) {
+  if (!visibleRequests.length) {
     el.requestTableBody.innerHTML = `
       <tr>
-        <td colspan="6" class="empty-cell">No requests available with current filters.</td>
+        <td colspan="6" class="empty-cell">No unapproved requests available with the current filter.</td>
       </tr>
     `;
     return;
   }
 
-  el.requestTableBody.innerHTML = visible.map((r) => {
-    const requestedLine = `${escapeHtml(r.artistInput || "—")} — ${escapeHtml(r.songInput || "—")}`;
-    const spotifyLine = r.spotify
-      ? `
+  el.requestTableBody.innerHTML = visibleRequests.map((request) => {
+    const requestedLine = `${escapeHtml(request.artistInput || "—")} — ${escapeHtml(request.songInput || "—")}`;
+
+    let spotifyMatchHtml = `<div class="spotify-match">${escapeHtml(request.error || "No Spotify match")}</div>`;
+    if (request.spotify) {
+      spotifyMatchHtml = `
         <div class="spotify-match">
-          <a class="linklike" href="${escapeHtml(r.spotify.externalUrl)}" target="_blank" rel="noopener">
-            ${escapeHtml(r.spotify.artist)} — ${escapeHtml(r.spotify.name)}
+          <a class="linklike" href="${escapeHtml(request.spotify.externalUrl)}" target="_blank" rel="noopener">
+            ${escapeHtml(request.spotify.artist)} — ${escapeHtml(request.spotify.name)}
           </a>
         </div>
-        <div class="song-meta">${escapeHtml(r.spotify.album)}</div>
-      `
-      : `<div class="spotify-match">${escapeHtml(r.error || "No Spotify match")}</div>`;
-
-    const length = r.spotify ? msToMinSec(r.spotify.durationMs) : "—";
-
-    let badgeHtml = `<span class="badge unknown">Unknown</span>`;
-    if (r.spotify && r.spotify.explicit === false) {
-      badgeHtml = `<span class="badge clean">Clean</span>`;
-    } else if (r.spotify && r.spotify.explicit === true) {
-      badgeHtml = `<span class="badge explicit">Explicit</span>`;
+        <div class="song-meta">${escapeHtml(request.spotify.album)}</div>
+      `;
     }
 
-    const canApprove = r.spotify && requestLooksClean(r.spotify) && !isApproved(r.requestId);
-    const isAlreadyApproved = isApproved(r.requestId);
+    const length = request.spotify ? msToMinSec(request.spotify.durationMs) : "—";
+    const canApprove = request.spotify && request.spotify.explicit === false;
 
     return `
       <tr>
-        <td>${escapeHtml(r.timestamp || "—")}</td>
+        <td>${escapeHtml(request.timestamp || "—")}</td>
         <td class="song-cell">
           <div>${requestedLine}</div>
-          <div class="song-meta">${escapeHtml(r.email || "")}</div>
+          <div class="song-meta">${escapeHtml(request.email || "")}</div>
         </td>
-        <td>${spotifyLine}</td>
+        <td>${spotifyMatchHtml}</td>
         <td>${escapeHtml(length)}</td>
-        <td>${badgeHtml}</td>
+        <td>${getStatusBadgeHtml(request)}</td>
         <td>
           <div class="cell-actions">
-            <button class="mini-btn approve" data-action="approve" data-id="${escapeHtml(r.requestId)}" ${canApprove ? "" : "disabled"}>
-              ${isAlreadyApproved ? "Approved" : "Approve"}
+            <button
+              class="mini-btn approve"
+              data-action="approve"
+              data-id="${escapeHtml(request.requestId)}"
+              ${canApprove ? "" : "disabled"}>
+              Approve
             </button>
-            <button class="mini-btn" data-action="playlist" data-id="${escapeHtml(r.requestId)}" ${r.spotify ? "" : "disabled"}>
+
+            <button
+              class="mini-btn queue"
+              data-action="playlist"
+              data-id="${escapeHtml(request.requestId)}"
+              ${request.spotify && request.spotify.explicit === false ? "" : "disabled"}>
               Add to Playlist
             </button>
-            <button class="mini-btn" data-action="queue" data-id="${escapeHtml(r.requestId)}" ${r.spotify ? "" : "disabled"}>
-              Add to Queue
-            </button>
-            <button class="mini-btn reject" data-action="reject" data-id="${escapeHtml(r.requestId)}">
-              Hide
+
+            <button
+              class="mini-btn reject"
+              data-action="reject"
+              data-id="${escapeHtml(request.requestId)}">
+              Don't Approve
             </button>
           </div>
         </td>
@@ -661,39 +747,37 @@ function renderRequests(requests) {
     `;
   }).join("");
 
-  el.requestTableBody.querySelectorAll("[data-action]").forEach((btn) => {
-    btn.addEventListener("click", async (event) => {
+  el.requestTableBody.querySelectorAll("[data-action]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
       const action = event.currentTarget.dataset.action;
       const requestId = event.currentTarget.dataset.id;
-      const requestObj = currentRequests.find(item => item.requestId === requestId);
-      if (!requestObj) return;
+      const request = currentRequests.find((item) => item.requestId === requestId);
+      if (!request) return;
 
       try {
         if (action === "approve") {
-          approveRequest(requestObj);
+          approveRequest(request);
         } else if (action === "reject") {
-          rejectRequest(requestObj);
+          rejectRequest(request);
         } else if (action === "playlist") {
-          if (!requestObj.spotify) return;
-          await addTrackToPlaylist(requestObj.spotify.uri);
-          setStatus(`Added to Spotify playlist: ${requestObj.spotify.artist} — ${requestObj.spotify.name}`);
-        } else if (action === "queue") {
-          if (!requestObj.spotify) return;
-          await addTrackToSpotifyQueue(requestObj.spotify.uri);
-          setStatus(`Added to Spotify queue: ${requestObj.spotify.artist} — ${requestObj.spotify.name}`);
+          if (!request.spotify || request.spotify.explicit) return;
+          await addTrackToPlaylist(request.spotify.uri);
+          setStatus(`Added to Spotify playlist: ${request.spotify.artist} — ${request.spotify.name}`);
         }
-      } catch (err) {
-        console.error(err);
-        setStatus(`Action failed: ${err.message}`);
+      } catch (error) {
+        console.error(error);
+        setStatus(`Request action failed: ${error.message}`);
       }
     });
   });
 }
 
-// ---------- APPROVED QUEUE ----------
+// ======================================================
+// APPROVED QUEUE RENDER
+// ======================================================
 function renderApprovedQueue() {
   const queue = getApprovedQueue();
-  const idx = clampQueuePointer();
+  const currentIndex = clampQueuePointer();
 
   if (!queue.length) {
     el.approvedQueueList.innerHTML = `<li class="empty-item">No approved songs yet.</li>`;
@@ -701,31 +785,38 @@ function renderApprovedQueue() {
     return;
   }
 
-  el.approvedQueueList.innerHTML = queue.map((item, i) => {
-    const isCurrent = i === idx;
+  el.approvedQueueList.innerHTML = queue.map((item, index) => {
+    const currentClass = index === currentIndex ? "queue-current" : "";
+
     return `
-      <li>
+      <li class="${currentClass}">
         <div class="approved-line">
-          ${isCurrent ? "▶ " : ""}${escapeHtml(item.spotify.artist)} — ${escapeHtml(item.spotify.name)}
+          ${index === currentIndex ? "▶ " : ""}${escapeHtml(item.spotify.artist)} — ${escapeHtml(item.spotify.name)}
         </div>
+
         <div class="approved-meta">
-          Length: ${escapeHtml(msToMinSec(item.spotify.durationMs))} | Requested: ${escapeHtml(item.requestedArtist)} — ${escapeHtml(item.requestedSong)}
+          Length: ${escapeHtml(msToMinSec(item.spotify.durationMs))}
+          | Requested: ${escapeHtml(item.requestedArtist)} — ${escapeHtml(item.requestedSong)}
         </div>
+
         <div class="cell-actions" style="margin-top:8px;">
           <button class="mini-btn" data-approved-action="play" data-approved-id="${escapeHtml(item.requestId)}">Play</button>
-          <button class="mini-btn" data-approved-action="queue" data-approved-id="${escapeHtml(item.requestId)}">Queue</button>
+          <button class="mini-btn queue" data-approved-action="queue" data-approved-id="${escapeHtml(item.requestId)}">Queue</button>
+          <button class="mini-btn" data-approved-action="playlist" data-approved-id="${escapeHtml(item.requestId)}">Playlist</button>
           <button class="mini-btn reject" data-approved-action="remove" data-approved-id="${escapeHtml(item.requestId)}">Remove</button>
         </div>
       </li>
     `;
   }).join("");
 
-  el.approvedQueueList.querySelectorAll("[data-approved-action]").forEach((btn) => {
-    btn.addEventListener("click", async (event) => {
+  el.approvedQueueList.querySelectorAll("[data-approved-action]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
       const action = event.currentTarget.dataset.approvedAction;
       const requestId = event.currentTarget.dataset.approvedId;
       const queue = getApprovedQueue();
-      const item = queue.find(q => q.requestId === requestId);
+      const item = queue.find((q) => q.requestId === requestId);
+      const itemIndex = queue.findIndex((q) => q.requestId === requestId);
+
       if (!item) return;
 
       try {
@@ -733,18 +824,21 @@ function renderApprovedQueue() {
           removeApproved(requestId);
         } else if (action === "play") {
           await playTrackNow(item.spotify.uri);
-          setQueuePointer(queue.findIndex(q => q.requestId === requestId));
+          setQueuePointer(Math.max(0, itemIndex));
           renderApprovedQueue();
           updateUpNext();
           setStatus(`Playing now: ${item.spotify.artist} — ${item.spotify.name}`);
           await refreshPlayback();
         } else if (action === "queue") {
           await addTrackToSpotifyQueue(item.spotify.uri);
-          setStatus(`Queued on Spotify: ${item.spotify.artist} — ${item.spotify.name}`);
+          setStatus(`Added to Spotify queue: ${item.spotify.artist} — ${item.spotify.name}`);
+        } else if (action === "playlist") {
+          await addTrackToPlaylist(item.spotify.uri);
+          setStatus(`Added to Spotify playlist: ${item.spotify.artist} — ${item.spotify.name}`);
         }
-      } catch (err) {
-        console.error(err);
-        setStatus(`Approved queue action failed: ${err.message}`);
+      } catch (error) {
+        console.error(error);
+        setStatus(`Approved action failed: ${error.message}`);
       }
     });
   });
@@ -754,32 +848,36 @@ function renderApprovedQueue() {
 
 function updateUpNext() {
   const queue = getApprovedQueue();
-  const idx = clampQueuePointer();
+  const index = clampQueuePointer();
 
   if (!queue.length) {
     el.upNext.textContent = "No approved songs yet";
     return;
   }
 
-  const next = queue[idx + 1];
+  const next = queue[index + 1];
   if (!next) {
-    el.upNext.textContent = "End of approved queue";
+    el.upNext.textContent = "End of approved list";
     return;
   }
 
-  el.upNext.textContent = `${next.spotify.artist} — ${next.spotify.name} (${msToMinSec(next.spotify.durationMs)})`;
+  el.upNext.textContent =
+    `${next.spotify.artist} — ${next.spotify.name} (${msToMinSec(next.spotify.durationMs)})`;
 }
 
+// ======================================================
+// QUEUE NAVIGATION + CURRENT SONG ACTIONS
+// ======================================================
 function goPrevQueue() {
-  const idx = Math.max(0, getQueuePointer() - 1);
-  setQueuePointer(idx);
+  const nextIndex = Math.max(0, getQueuePointer() - 1);
+  setQueuePointer(nextIndex);
   renderApprovedQueue();
 }
 
 function goNextQueue() {
   const queue = getApprovedQueue();
-  const idx = Math.min(queue.length - 1, getQueuePointer() + 1);
-  setQueuePointer(Math.max(0, idx));
+  const nextIndex = Math.min(Math.max(0, queue.length - 1), getQueuePointer() + 1);
+  setQueuePointer(nextIndex);
   renderApprovedQueue();
 }
 
@@ -790,12 +888,12 @@ async function playCurrentApproved() {
     return;
   }
 
-  const idx = clampQueuePointer();
-  const item = queue[idx];
+  const index = clampQueuePointer();
+  const item = queue[index];
   if (!item) return;
 
   await playTrackNow(item.spotify.uri);
-  setStatus(`Playing current approved song: ${item.spotify.artist} — ${item.spotify.name}`);
+  setStatus(`Playing approved song: ${item.spotify.artist} — ${item.spotify.name}`);
   await refreshPlayback();
 }
 
@@ -806,117 +904,139 @@ async function addCurrentApprovedToQueue() {
     return;
   }
 
-  const idx = clampQueuePointer();
-  const item = queue[idx];
+  const index = clampQueuePointer();
+  const item = queue[index];
   if (!item) return;
 
   await addTrackToSpotifyQueue(item.spotify.uri);
-  setStatus(`Added current approved song to Spotify queue: ${item.spotify.artist} — ${item.spotify.name}`);
+  setStatus(`Queued approved song: ${item.spotify.artist} — ${item.spotify.name}`);
 }
 
-// ---------- PLAYBACK UI ----------
+// ======================================================
+// PLAYBACK UI
+// ======================================================
 async function refreshPlayback() {
   const playback = await getCurrentlyPlaying();
 
   if (!playback || !playback.item) {
     el.nowPlaying.textContent = "Nothing currently loaded";
-    el.nowPlayingMeta.textContent = "Open Spotify on an active Premium device, then play or queue a track.";
+    el.nowPlayingMeta.textContent =
+      "Open Spotify on an active Premium device, then play or queue a track.";
     return;
   }
 
   const track = playback.item;
-  const artist = track.artists?.map(a => a.name).join(", ") || "Unknown artist";
-  const trackName = track.name || "Unknown track";
+  const artist = track.artists?.map((a) => a.name).join(", ") || "Unknown artist";
+  const title = track.name || "Unknown track";
   const album = track.album?.name || "Unknown album";
 
-  el.nowPlaying.textContent = `${artist} — ${trackName}`;
-  el.nowPlayingMeta.textContent = `Album: ${album} | Length: ${msToMinSec(track.duration_ms)} | Explicit: ${track.explicit ? "Yes" : "No"}`;
+  el.nowPlaying.textContent = `${artist} — ${title}`;
+  el.nowPlayingMeta.textContent =
+    `Album: ${album} | Length: ${msToMinSec(track.duration_ms)} | Explicit: ${track.explicit ? "Yes" : "No"}`;
 }
 
 function startPlaybackPolling() {
-  if (playbackPollTimer) clearInterval(playbackPollTimer);
-  playbackPollTimer = setInterval(() => {
-    refreshPlayback().catch((err) => console.warn("Playback poll failed", err));
-  }, CONFIG.pollPlaybackMs);
+  if (playbackTimer) clearInterval(playbackTimer);
+
+  playbackTimer = setInterval(() => {
+    refreshPlayback().catch((error) => {
+      console.warn("Playback refresh failed:", error);
+    });
+  }, CONFIG.playbackPollMs);
 }
 
-// ---------- LOAD FLOW ----------
+// ======================================================
+// LOAD REQUESTS
+// ======================================================
 async function loadStudentRequests() {
-  setStatus("Loading Google Form requests...");
-  const rawRows = await fetchRequestRows();
-  setStatus(`Found ${rawRows.length} request row(s). Checking Spotify track metadata...`);
-  currentRequests = await enrichRequests(rawRows);
+  setStatus("Loading student requests from Google Forms...");
+  const rawRows = await fetchStudentRequestRows();
+
+  setStatus(`Found ${rawRows.length} request row(s). Checking Spotify metadata...`);
+  currentRequests = await enrichRequestRows(rawRows);
+
   buildRequestSummary(currentRequests);
   renderRequests(currentRequests);
+
   setStatus("Requests loaded.");
 }
 
-// ---------- EVENTS ----------
+// ======================================================
+// EVENTS
+// ======================================================
 function bindEvents() {
   el.btnLogin?.addEventListener("click", loginToSpotify);
   el.btnLogout?.addEventListener("click", logoutSpotify);
+
   el.btnLoadRequests?.addEventListener("click", async () => {
     try {
       await loadStudentRequests();
-    } catch (err) {
-      console.error(err);
-      setStatus(`Load requests failed: ${err.message}`);
+    } catch (error) {
+      console.error(error);
+      setStatus(`Load requests failed: ${error.message}`);
     }
   });
+
   el.btnRefreshPlayback?.addEventListener("click", async () => {
     try {
       await refreshPlayback();
       setStatus("Playback refreshed.");
-    } catch (err) {
-      console.error(err);
-      setStatus(`Playback refresh failed: ${err.message}`);
+    } catch (error) {
+      console.error(error);
+      setStatus(`Playback refresh failed: ${error.message}`);
     }
   });
+
   el.btnPrevQueue?.addEventListener("click", goPrevQueue);
   el.btnNextQueue?.addEventListener("click", goNextQueue);
+
   el.btnPlayApproved?.addEventListener("click", async () => {
     try {
       await playCurrentApproved();
-    } catch (err) {
-      console.error(err);
-      setStatus(`Play failed: ${err.message}`);
+    } catch (error) {
+      console.error(error);
+      setStatus(`Play failed: ${error.message}`);
     }
   });
+
   el.btnAddApprovedToQueue?.addEventListener("click", async () => {
     try {
       await addCurrentApprovedToQueue();
-    } catch (err) {
-      console.error(err);
-      setStatus(`Queue add failed: ${err.message}`);
+    } catch (error) {
+      console.error(error);
+      setStatus(`Queue add failed: ${error.message}`);
     }
   });
-  el.hideExplicitOnly?.addEventListener("change", () => renderRequests(currentRequests));
+
+  el.hideExplicitOnly?.addEventListener("change", () => {
+    renderRequests(currentRequests);
+  });
 }
 
-// ---------- INIT ----------
+// ======================================================
+// INIT
+// ======================================================
 async function init() {
+  ensureStorageDefaults();
   bindEvents();
   renderApprovedQueue();
   updateUpNext();
 
   try {
-    await handleAuthCallback();
-  } catch (err) {
-    console.error(err);
-    setStatus(`Spotify auth failed: ${err.message}`);
+    await handleSpotifyCallback();
+  } catch (error) {
+    console.error(error);
+    setStatus(`Spotify auth failed: ${error.message}`);
   }
 
   try {
     await refreshPlayback();
-  } catch (err) {
-    console.warn(err);
+  } catch (error) {
+    console.warn("Initial playback refresh failed:", error);
   }
 
   startPlaybackPolling();
-
-  if (spotifyPlaylistUrl(CONFIG.playlistId)) {
-    setStatus(`Ready. Playlist: ${spotifyPlaylistUrl(CONFIG.playlistId)}`);
-  }
+  setStatus("Ready.");
 }
 
 init();
