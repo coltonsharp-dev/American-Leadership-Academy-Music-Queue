@@ -1,6 +1,6 @@
 // ======================================================
 // ALA Music Requester
-// Full compiled app.js
+// Full compiled app.js with playlist access verification
 // ======================================================
 
 // --------------------
@@ -9,7 +9,7 @@
 const CONFIG = {
   clientId: "cbfd828db1414a2183039d01ceeaf181",
   redirectUri: "https://coltonsharp-dev.github.io/American-Leadership-Academy-Music-Queue/",
-  playlistId: "3dcGJ6miJHVxZkQEIwGog5",
+  playlistId: "2gGTROyeKdYx8oZ60un1GU",
   requestsCsvUrl:
     "https://docs.google.com/spreadsheets/d/e/2PACX-1vQyc3RRDmjc-nN-XgMMDocbnn1tlxue5ynNoNnYSxnRKxgp2LRGNmYZXnVgAFLH7IViwTAtmIAkvDsK/pub?output=csv",
   scopes: [
@@ -115,6 +115,10 @@ function normalizeHeader(value) {
 
 function buildRequestId(row) {
   return [row.timestamp || "", row.email || "", row.spotifyLink || ""].join("|");
+}
+
+function normalizeSpotifyUserId(value) {
+  return String(value ?? "").trim().toLowerCase();
 }
 
 // ======================================================
@@ -447,74 +451,6 @@ async function getPlaylistDetails(playlistId) {
   return spotifyFetch(`/playlists/${playlistId}`);
 }
 
-function normalizeSpotifyUserId(value) {
-  return String(value ?? "").trim().toLowerCase();
-}
-
-async function verifyPlaylistAccess() {
-  try {
-    setStatus("Checking Spotify account and playlist access...");
-
-    const me = await getCurrentUserProfile();
-    const playlist = await getPlaylistDetails(CONFIG.playlistId);
-
-    const currentUserId = normalizeSpotifyUserId(me?.id);
-    const currentDisplay =
-      me?.display_name || me?.id || "Unknown user";
-
-    const ownerUserId = normalizeSpotifyUserId(playlist?.owner?.id);
-    const ownerDisplay =
-      playlist?.owner?.display_name || playlist?.owner?.id || "Unknown owner";
-
-    const collaborative = !!playlist?.collaborative;
-    const publicState =
-      typeof playlist?.public === "boolean" ? String(playlist.public) : "unknown";
-
-    const isOwner = currentUserId && ownerUserId && currentUserId === ownerUserId;
-
-    let messageParts = [
-      `Logged in as: ${currentDisplay}`,
-      `Playlist owner: ${ownerDisplay}`,
-      `Playlist name: ${playlist?.name || "Unknown playlist"}`,
-      `Collaborative: ${collaborative ? "Yes" : "No"}`,
-      `Public: ${publicState}`
-    ];
-
-    if (isOwner) {
-      messageParts.push("Access check: You are the playlist owner.");
-    } else if (collaborative) {
-      messageParts.push(
-        "Access check: You are not the owner. Because the playlist is collaborative, editing may be allowed depending on the account and playlist settings."
-      );
-    } else {
-      messageParts.push(
-        "Access check: You are not the playlist owner, and the playlist is not collaborative. Add to Playlist will likely fail."
-      );
-    }
-
-    const finalMessage = messageParts.join(" | ");
-    setStatus(finalMessage);
-
-    console.log("Playlist access check:", {
-      loggedInUser: me,
-      playlist,
-      isOwner,
-      collaborative
-    });
-
-    return {
-      me,
-      playlist,
-      isOwner,
-      collaborative
-    };
-  } catch (error) {
-    console.error("verifyPlaylistAccess failed:", error);
-    setStatus(error?.message || "Playlist access check failed.");
-    return null;
-  }
-}
-
 async function getTrackById(trackId) {
   return spotifyFetch(`/tracks/${trackId}`);
 }
@@ -579,8 +515,85 @@ async function ensureActiveDevice() {
   return controllable;
 }
 
+async function verifyPlaylistAccess() {
+  try {
+    setStatus("Checking Spotify account and playlist access...");
+
+    const me = await getCurrentUserProfile();
+    const playlist = await getPlaylistDetails(CONFIG.playlistId);
+
+    const currentUserId = normalizeSpotifyUserId(me?.id);
+    const currentDisplay = me?.display_name || me?.id || "Unknown user";
+
+    const ownerUserId = normalizeSpotifyUserId(playlist?.owner?.id);
+    const ownerDisplay =
+      playlist?.owner?.display_name || playlist?.owner?.id || "Unknown owner";
+
+    const collaborative = !!playlist?.collaborative;
+    const publicState =
+      typeof playlist?.public === "boolean" ? String(playlist.public) : "unknown";
+
+    const isOwner = currentUserId && ownerUserId && currentUserId === ownerUserId;
+
+    const messageParts = [
+      `Logged in as: ${currentDisplay}`,
+      `Playlist owner: ${ownerDisplay}`,
+      `Playlist name: ${playlist?.name || "Unknown playlist"}`,
+      `Collaborative: ${collaborative ? "Yes" : "No"}`,
+      `Public: ${publicState}`
+    ];
+
+    if (isOwner) {
+      messageParts.push("Access check: You are the playlist owner.");
+    } else if (collaborative) {
+      messageParts.push(
+        "Access check: You are not the owner. Because the playlist is collaborative, editing may be allowed depending on Spotify account and playlist settings."
+      );
+    } else {
+      messageParts.push(
+        "Access check: You are not the playlist owner, and the playlist is not collaborative. Add to Playlist will likely fail."
+      );
+    }
+
+    const finalMessage = messageParts.join(" | ");
+    setStatus(finalMessage);
+
+    console.log("Playlist access check:", {
+      loggedInUser: me,
+      playlist,
+      isOwner,
+      collaborative
+    });
+
+    return {
+      me,
+      playlist,
+      isOwner,
+      collaborative
+    };
+  } catch (error) {
+    console.error("verifyPlaylistAccess failed:", error);
+    setStatus(error?.message || "Playlist access check failed.");
+    return null;
+  }
+}
+
 async function addTrackToPlaylist(trackUri) {
   try {
+    const accessInfo = await verifyPlaylistAccess();
+
+    if (!accessInfo) {
+      throw new Error("Could not verify playlist access.");
+    }
+
+    const { isOwner, collaborative } = accessInfo;
+
+    if (!isOwner && !collaborative) {
+      throw new Error(
+        "Spotify blocked Add to Playlist because the logged-in account does not own this playlist and the playlist is not collaborative."
+      );
+    }
+
     return await spotifyFetch(`/playlists/${CONFIG.playlistId}/tracks`, {
       method: "POST",
       body: JSON.stringify({ uris: [trackUri] })
@@ -590,7 +603,7 @@ async function addTrackToPlaylist(trackUri) {
 
     if (msg.includes("403")) {
       throw new Error(
-        "Spotify blocked Add to Playlist. Make sure you are logged into the Spotify account that owns this playlist or can edit it."
+        "Spotify blocked Add to Playlist. The logged-in Spotify account may not own this playlist, may not have edit access, or your token may need to be refreshed by logging out and back in."
       );
     }
 
@@ -827,16 +840,6 @@ function buildRequestSummary(requests) {
     el.requestSummary.textContent =
       `Loaded ${total} request(s) | Valid Spotify links: ${valid} | Clean: ${clean} | Explicit: ${explicit} | Errors: ${errors}`;
   }
-}
-
-function getStatusBadgeHtml(request) {
-  if (request.spotify && request.spotify.explicit === false) {
-    return `<span class="badge badge-clean">Clean</span>`;
-  }
-  if (request.spotify && request.spotify.explicit === true) {
-    return `<span class="badge badge-explicit">Explicit</span>`;
-  }
-  return `<span class="badge badge-error">Error</span>`;
 }
 
 // ======================================================
@@ -1232,6 +1235,15 @@ function wireStaticEvents() {
     } catch (error) {
       console.error(error);
       setStatus(error?.message || "Failed to load requests.");
+    }
+  });
+
+  el.btnVerifyPlaylistAccess?.addEventListener("click", async () => {
+    try {
+      await verifyPlaylistAccess();
+    } catch (error) {
+      console.error(error);
+      setStatus(error?.message || "Could not verify playlist access.");
     }
   });
 
