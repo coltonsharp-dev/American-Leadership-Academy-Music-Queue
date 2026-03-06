@@ -163,6 +163,7 @@ function setQueuePointer(index) {
 
 function clampQueuePointer() {
   const queue = getApprovedQueue();
+
   if (!queue.length) {
     setQueuePointer(0);
     return 0;
@@ -174,6 +175,9 @@ function clampQueuePointer() {
   return clamped;
 }
 
+// ======================================================
+// CSV PARSER
+// ======================================================
 function parseCSV(text) {
   const rows = [];
   let row = [];
@@ -524,15 +528,15 @@ async function fetchStudentRequestRows() {
   if (!rows.length) return [];
 
   return rows
-  .slice(1)
-  .filter((row) => Array.isArray(row) && row.some((cell) => String(cell ?? "").trim() !== ""))
-  .map((row) => ({
-    timestamp: String(row[0] ?? "").trim(),
-    email: String(row[1] ?? "").trim(),
-    spotifyLink: String(row[2] ?? "").trim(),
-    artistInput: String(row[3] ?? "").trim(),
-    songInput: String(row[4] ?? "").trim()
-  }));
+    .slice(1)
+    .filter((row) => Array.isArray(row) && row.some((cell) => String(cell ?? "").trim() !== ""))
+    .map((row) => ({
+      timestamp: String(row[0] ?? "").trim(),
+      email: String(row[1] ?? "").trim(),
+      spotifyLink: String(row[2] ?? "").trim(),
+      artistInput: String(row[3] ?? "").trim(),
+      songInput: String(row[4] ?? "").trim()
+    }));
 }
 
 async function enrichRequestRows(rows) {
