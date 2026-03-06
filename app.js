@@ -1,7 +1,6 @@
 // ======================================================
 // ALA Music Requester
-// app.js
-// Corrected to read Google Form CSV reliably
+// Full corrected app.js
 // ======================================================
 
 // --------------------
@@ -14,6 +13,8 @@ const CONFIG = {
   requestsCsvUrl:
     "https://docs.google.com/spreadsheets/d/e/2PACX-1vQyc3RRDmjc-nN-XgMMDocbnn1tlxue5ynNoNnYSxnRKxgp2LRGNmYZXnVgAFLH7IViwTAtmIAkvDsK/pub?output=csv",
   scopes: [
+    "user-read-private",
+    "user-read-email",
     "user-read-playback-state",
     "user-modify-playback-state",
     "playlist-modify-public",
@@ -433,6 +434,10 @@ async function spotifyFetch(path, options = {}) {
   return response.json();
 }
 
+async function getCurrentUserProfile() {
+  return spotifyFetch("/me");
+}
+
 async function getTrackById(trackId) {
   return spotifyFetch(`/tracks/${trackId}`);
 }
@@ -446,16 +451,91 @@ async function getCurrentlyPlaying() {
   }
 }
 
-async function addTrackToPlaylist(trackUri) {
-  return spotifyFetch(`/playlists/${CONFIG.playlistId}/tracks`, {
-    method: "POST",
-    body: JSON.stringify({ uris: [trackUri] })
+async function getAvailableDevices() {
+  return spotifyFetch("/me/player/devices");
+}
+
+async function transferPlaybackToDevice(deviceId, shouldPlay = false) {
+  const token = await getAccessToken();
+  if (!token) throw new Error("Spotify login required.");
+
+  const response = await fetch("https://api.spotify.com/v1/me/player", {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      device_ids: [deviceId],
+      play: shouldPlay
+    })
   });
+
+  if (!response.ok && response.status !== 204) {
+    const text = await response.text();
+    throw new Error(`${response.status} ${text}`);
+  }
+}
+
+async function ensureActiveDevice() {
+  const deviceData = await getAvailableDevices();
+  const devices = deviceData?.devices || [];
+
+  if (!devices.length) {
+    throw new Error(
+      "No Spotify devices found. Open Spotify on your phone, desktop app, or web player and start playback first."
+    );
+  }
+
+  const activeDevice = devices.find((d) => d.is_active);
+  if (activeDevice) return activeDevice;
+
+  const controllable = devices.find((d) => !d.is_restricted) || devices[0];
+
+  if (!controllable?.id) {
+    throw new Error(
+      "A Spotify device was found, but it cannot be controlled. Open Spotify and start playback manually first."
+    );
+  }
+
+  await transferPlaybackToDevice(controllable.id, false);
+  return controllable;
+}
+
+async function getPlaylist(playlistId) {
+  return spotifyFetch(`/playlists/${playlistId}`);
+}
+
+async function addTrackToPlaylist(trackUri) {
+  try {
+    return await spotifyFetch(`/playlists/${CONFIG.playlistId}/tracks`, {
+      method: "POST",
+      body: JSON.stringify({ uris: [trackUri] })
+    });
+  } catch (error) {
+    const msg = String(error?.message || "");
+
+    if (msg.includes("403")) {
+      throw new Error(
+        "Spotify blocked Add to Playlist. Make sure you are logged into the Spotify account that owns this playlist or can edit it."
+      );
+    }
+
+    if (msg.includes("404")) {
+      throw new Error(
+        "Playlist not found. Double-check the playlistId in CONFIG."
+      );
+    }
+
+    throw error;
+  }
 }
 
 async function addTrackToSpotifyQueue(trackUri) {
   const token = await getAccessToken();
   if (!token) throw new Error("Spotify login required.");
+
+  await ensureActiveDevice();
 
   const url = new URL("https://api.spotify.com/v1/me/player/queue");
   url.searchParams.set("uri", trackUri);
@@ -469,6 +549,19 @@ async function addTrackToSpotifyQueue(trackUri) {
 
   if (!response.ok && response.status !== 204) {
     const text = await response.text();
+
+    if (response.status === 404 && text.includes("NO_ACTIVE_DEVICE")) {
+      throw new Error(
+        "No active Spotify device found. Open Spotify and start playback on a Premium account, then try again."
+      );
+    }
+
+    if (response.status === 403) {
+      throw new Error(
+        "Spotify blocked Add to Queue. Usually this means the account is not Premium or the player/device cannot be controlled."
+      );
+    }
+
     throw new Error(`${response.status} ${text}`);
   }
 }
@@ -476,6 +569,8 @@ async function addTrackToSpotifyQueue(trackUri) {
 async function playTrackNow(trackUri) {
   const token = await getAccessToken();
   if (!token) throw new Error("Spotify login required.");
+
+  await ensureActiveDevice();
 
   const response = await fetch("https://api.spotify.com/v1/me/player/play", {
     method: "PUT",
@@ -488,16 +583,25 @@ async function playTrackNow(trackUri) {
 
   if (!response.ok && response.status !== 204) {
     const text = await response.text();
+
+    if (response.status === 404 && text.includes("NO_ACTIVE_DEVICE")) {
+      throw new Error(
+        "No active Spotify device found. Open Spotify and start playback first."
+      );
+    }
+
+    if (response.status === 403) {
+      throw new Error(
+        "Spotify blocked playback. Usually this means the logged-in account is not Premium."
+      );
+    }
+
     throw new Error(`${response.status} ${text}`);
   }
 }
 
 // ======================================================
 // GOOGLE SHEET REQUEST LOADING
-// Correct headers in your sheet:
-//   Timestamp
-//   Email Address
-//   Please insert the Spotify song share link here:
 // ======================================================
 function findHeaderIndex(headers, candidates, fallbackIndex = -1) {
   const normalized = headers.map(normalizeHeader);
@@ -536,12 +640,7 @@ async function fetchStudentRequestRows() {
 
   const headers = rows[0].map((cell) => String(cell ?? "").trim());
 
-  const timestampIndex = findHeaderIndex(
-    headers,
-    ["Timestamp"],
-    0
-  );
-
+  const timestampIndex = findHeaderIndex(headers, ["Timestamp"], 0);
   const emailIndex = findHeaderIndex(
     headers,
     ["Email Address", "Email", "Student Email"],
@@ -805,6 +904,9 @@ function renderApprovedQueue() {
           <span>${escapeHtml(label)}</span>
           <button class="remove-approved-btn" data-request-id="${escapeHtml(item.requestId)}">
             Remove
+          </button>
+          <button class="add-playlist-btn" data-request-id="${escapeHtml(item.requestId)}">
+            Add to Playlist
           </button>
         </li>
       `;
@@ -1084,13 +1186,23 @@ async function init() {
   await handleSpotifyCallback();
 
   try {
+    const me = await getCurrentUserProfile();
+    if (me?.display_name) {
+      setStatus(`Ready. Logged in as ${me.display_name}.`);
+    } else {
+      setStatus("Ready.");
+    }
+  } catch {
+    setStatus("Ready.");
+  }
+
+  try {
     await refreshPlayback();
   } catch (error) {
     console.warn("Initial playback refresh failed:", error);
   }
 
   startPlaybackPolling();
-  setStatus("Ready.");
 }
 
 window.addEventListener("DOMContentLoaded", () => {
