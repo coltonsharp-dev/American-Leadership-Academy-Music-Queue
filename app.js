@@ -534,8 +534,8 @@ async function fetchStudentRequestRows() {
       timestamp: String(row[0] ?? "").trim(),
       email: String(row[1] ?? "").trim(),
       spotifyLink: String(row[2] ?? "").trim(),
-      artistInput: String(row[3] ?? "").trim(),
-      songInput: String(row[4] ?? "").trim()
+      artistInput: "",
+      songInput: ""
     }));
 }
 
