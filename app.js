@@ -11,7 +11,7 @@ const CONFIG = {
   redirectUri: "https://coltonsharp-dev.github.io/American-Leadership-Academy-Music-Queue/",
   playlistId: "2gGTROyeKdYx8oZ60un1GU",
   requestsCsvUrl:
-    "https://docs.google.com/spreadsheets/d/1DeFHRZaqKAo4XVv6wM1LS0RlaAAerJeZIBhem-Msn1E/export?format=csv&gid=1619492613",
+    "https://docs.google.com/spreadsheets/d/e/2PACX-1vQyc3RRDmjc-nN-XgMMDocbnn1tlxue5ynNoNnYSxnRKxgp2LRGNmYZXnVgAFLH7IViwTAtmIAkvDsK/pub?output=csv",
   scopes: [
     "user-read-playback-state",
     "user-modify-playback-state",
@@ -104,9 +104,7 @@ function buildRequestId(row) {
   return [
     row.timestamp || "",
     row.email || "",
-    row.spotifyLink || "",
-    row.artistInput || "",
-    row.songInput || ""
+    row.spotifyLink || ""
   ].join("|");
 }
 
@@ -504,13 +502,9 @@ async function playTrackNow(trackUri) {
 
 // ======================================================
 // GOOGLE SHEET REQUEST LOADING
-// Column mapping:
 // A = Timestamp
 // B = Email Address
-// C = Spotify track link
-// D = Artist name
-// E = Song name
-// F = Score (ignored)
+// C = Spotify share link
 // ======================================================
 async function fetchStudentRequestRows() {
   const url =
@@ -641,8 +635,6 @@ function approveRequest(request) {
     requestId: request.requestId,
     timestamp: request.timestamp,
     email: request.email,
-    requestedArtist: request.artistInput,
-    requestedSong: request.songInput,
     spotifyLink: request.spotifyLink,
     spotify: request.spotify
   });
@@ -696,7 +688,9 @@ function renderRequests(requests) {
   }
 
   el.requestTableBody.innerHTML = visibleRequests.map((request) => {
-    const requestedLine = `${escapeHtml(request.artistInput || "—")} — ${escapeHtml(request.songInput || "—")}`;
+    const requestedLine = request.spotify
+      ? `${escapeHtml(request.spotify.artist)} — ${escapeHtml(request.spotify.name)}`
+      : `Spotify link submitted`;
 
     let spotifyMatchHtml = `<div class="spotify-match">${escapeHtml(request.error || "No Spotify match")}</div>`;
     if (request.spotify) {
@@ -802,7 +796,7 @@ function renderApprovedQueue() {
 
         <div class="approved-meta">
           Length: ${escapeHtml(msToMinSec(item.spotify.durationMs))}
-          | Requested: ${escapeHtml(item.requestedArtist)} — ${escapeHtml(item.requestedSong)}
+          | Submitted by: ${escapeHtml(item.email || "Unknown")}
         </div>
 
         <div class="cell-actions" style="margin-top:8px;">
