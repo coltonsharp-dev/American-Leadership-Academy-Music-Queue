@@ -174,9 +174,6 @@ function clampQueuePointer() {
   return clamped;
 }
 
-// ======================================================
-// CSV PARSER
-// ======================================================
 function parseCSV(text) {
   const rows = [];
   let row = [];
@@ -205,24 +202,29 @@ function parseCSV(text) {
     }
 
     if ((ch === "\n" || ch === "\r") && !inQuotes) {
-      if (current.length || row.length) {
+      if (ch === "\r" && next === "\n") {
+        i++;
+      }
+
+      if (current.length > 0 || row.length > 0) {
         row.push(current);
         rows.push(row);
-        row = [];
-        current = "";
       }
+
+      row = [];
+      current = "";
       continue;
     }
 
     current += ch;
   }
 
-  if (current.length || row.length) {
+  if (current.length > 0 || row.length > 0) {
     row.push(current);
     rows.push(row);
   }
 
-  return rows;
+  return rows.filter((r) => Array.isArray(r));
 }
 
 // ======================================================
@@ -522,15 +524,15 @@ async function fetchStudentRequestRows() {
   if (!rows.length) return [];
 
   return rows
-    .slice(1)
-    .filter((row) => row.some((cell) => String(cell || "").trim() !== ""))
-    .map((row) => ({
-      timestamp: (row[0] || "").trim(),
-      email: (row[1] || "").trim(),
-      spotifyLink: (row[2] || "").trim(),
-      artistInput: (row[3] || "").trim(),
-      songInput: (row[4] || "").trim()
-    }));
+  .slice(1)
+  .filter((row) => Array.isArray(row) && row.some((cell) => String(cell ?? "").trim() !== ""))
+  .map((row) => ({
+    timestamp: String(row[0] ?? "").trim(),
+    email: String(row[1] ?? "").trim(),
+    spotifyLink: String(row[2] ?? "").trim(),
+    artistInput: String(row[3] ?? "").trim(),
+    songInput: String(row[4] ?? "").trim()
+  }));
 }
 
 async function enrichRequestRows(rows) {
