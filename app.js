@@ -9,7 +9,7 @@
 const CONFIG = {
   clientId: "cbfd828db1414a2183039d01ceeaf181",
   redirectUri: "https://coltonsharp-dev.github.io/American-Leadership-Academy-Music-Queue/",
-  playlistId: "2gGTROyeKdYx8oZ60un1GU",
+  playlistId: "3dcGJ6miJHVxZkQEIwGog5",
   requestsCsvUrl:
     "https://docs.google.com/spreadsheets/d/e/2PACX-1vQyc3RRDmjc-nN-XgMMDocbnn1tlxue5ynNoNnYSxnRKxgp2LRGNmYZXnVgAFLH7IViwTAtmIAkvDsK/pub?output=csv",
   scopes: [
