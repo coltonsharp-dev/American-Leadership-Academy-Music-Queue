@@ -712,15 +712,21 @@ async function enrichRequestRows(rows) {
       const track = await getTrackById(trackId);
 
       result.spotify = {
-        id: track.id,
-        uri: track.uri,
-        name: track.name,
-        artist: track.artists?.map((a) => a.name).join(", ") || "",
-        explicit: !!track.explicit,
-        durationMs: track.duration_ms,
-        externalUrl: track.external_urls?.spotify || spotifyTrackUrl(track.id),
-        album: track.album?.name || ""
-      };
+  id: track.id,
+  uri: track.uri,
+  name: track.name,
+  artist: track.artists?.map((a) => a.name).join(", ") || "",
+  explicit: !!track.explicit,
+  durationMs: track.duration_ms,
+  externalUrl: track.external_urls?.spotify || spotifyTrackUrl(track.id),
+  album: track.album?.name || "",
+  image:
+    track.album?.images?.[0]?.url ||
+    track.album?.images?.[1]?.url ||
+    track.album?.images?.[2]?.url ||
+    "",
+  previewUrl: track.preview_url || ""
+};
     } catch (error) {
       result.error = error?.message || "Spotify lookup failed";
     }
