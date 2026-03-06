@@ -11,7 +11,7 @@ const CONFIG = {
   redirectUri: "https://coltonsharp-dev.github.io/American-Leadership-Academy-Music-Queue/",
   playlistId: "2gGTROyeKdYx8oZ60un1GU",
   requestsCsvUrl:
-    "https://docs.google.com/spreadsheets/d/1KCFzjdK9LaUN-jY_6PnmUTU8jq2cZzW9TLEBEDWfnos/export?format=csv&gid=279601659",
+    "https://docs.google.com/spreadsheets/d/1DeFHRZaqKAo4XVv6wM1LS0RlaAAerJeZIBhem-Msn1E/export?format=csv&gid=1619492613",
   scopes: [
     "user-read-playback-state",
     "user-modify-playback-state",
