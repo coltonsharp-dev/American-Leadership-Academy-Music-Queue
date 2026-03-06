@@ -11,7 +11,7 @@
     <div>
       <h1>ALA Music Requester 🎵</h1>
       <p class="muted">
-        Student Spotify requests -> clean filter -> DJ approval -> playlist control
+        Student requests from Google Forms → Spotify check → approve or reject
       </p>
     </div>
 
@@ -48,10 +48,10 @@
     <section class="card spotify-card">
       <h2>Spotify Playlist</h2>
       <p class="muted">
-        This is your DJ playlist. Approved songs can be added from the request list.
+        Approved songs can be pushed to this playlist from the dashboard.
       </p>
 
-      <div id="spotifyEmbedWrap" class="spotify-embed-wrap">
+      <div class="spotify-embed-wrap">
         <iframe
           id="spotifyEmbed"
           style="border-radius:12px"
@@ -69,9 +69,9 @@
     <section class="card requests-card">
       <div class="section-heading-row">
         <div>
-          <h2>Student Requests</h2>
+          <h2>Unapproved Student Requests</h2>
           <p class="muted">
-            Requests are loaded from your Google Form responses tab.
+            Loaded from the Google Form responses tab. Column C is used as the Spotify link.
           </p>
         </div>
 
@@ -92,10 +92,10 @@
           <thead>
             <tr>
               <th>Time</th>
-              <th>Student Song</th>
+              <th>Requested Song</th>
               <th>Spotify Match</th>
               <th>Length</th>
-              <th>Clean</th>
+              <th>Status</th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -109,10 +109,14 @@
     </section>
 
     <section class="card approved-card">
-      <h2>Approved Queue</h2>
-      <p class="muted">
-        Songs you approve in the request list appear here for quick playback control.
-      </p>
+      <div class="section-heading-row">
+        <div>
+          <h2>Approved Songs</h2>
+          <p class="muted">
+            Songs you approve stay here for playback and queue control.
+          </p>
+        </div>
+      </div>
 
       <ol id="approvedQueueList" class="approved-list">
         <li class="empty-item">No approved songs yet.</li>
