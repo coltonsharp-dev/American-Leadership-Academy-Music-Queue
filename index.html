@@ -1,128 +1,118 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>ALA Music Requester</title>
+  <meta charset="UTF-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  />
+  <title>ALA Music Queue</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+    rel="stylesheet"
+  />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <header class="wrap topbar">
-    <div>
-      <h1>ALA Music Requester 🎵</h1>
-      <p class="muted">
-        Student requests from Google Forms → Spotify check → approve or reject
-      </p>
-    </div>
+  <div class="page-shell">
+    <main class="dashboard">
+      <section class="card hero-card">
+        <div class="hero-top">
+          <div class="hero-copy">
+            <p class="eyebrow">American Leadership Academy</p>
+            <h1>Music Queue Dashboard</h1>
+            <p class="hero-sub">
+              Review student song requests, verify the artwork, approve clean tracks,
+              and control the live queue with confidence.
+            </p>
+          </div>
 
-    <div class="topbar-actions">
-      <button id="btnLogin" class="btn">Login to Spotify</button>
-      <button id="btnLogout" class="btn secondary">Logout</button>
-      <button id="btnLoadRequests" class="btn secondary">Load Requests</button>
-      <button id="btnRefreshPlayback" class="btn secondary">Refresh Playback</button>
-    </div>
-  </header>
-
-  <main class="wrap dashboard">
-    <section class="card status-card">
-      <h2>System Status</h2>
-      <div id="status" class="status">Ready.</div>
-    </section>
-
-    <section class="card now-playing-card">
-      <h2>Now Playing</h2>
-      <div id="nowPlaying" class="now-playing-text">Nothing currently loaded</div>
-      <div id="nowPlayingMeta" class="muted">Waiting for playback data...</div>
-
-      <h3 class="subheading">Up Next</h3>
-      <div id="upNext" class="up-next-text">No approved songs yet</div>
-
-      <div class="action-row">
-        <button id="btnPrevQueue" class="btn secondary">Prev</button>
-        <button id="btnNextQueue" class="btn secondary">Next</button>
-        <button id="btnPlayApproved" class="btn secondary">Play Approved Song</button>
-        <button id="btnAddApprovedToQueue" class="btn secondary">Add Approved to Spotify Queue</button>
-      </div>
-    </section>
-
-    <section class="card spotify-card">
-      <h2>Spotify Playlist</h2>
-      <p class="muted">
-        Approved songs can be pushed to this playlist from the dashboard.
-      </p>
-
-      <div class="spotify-embed-wrap">
-        <iframe
-          id="spotifyEmbed"
-          style="border-radius:12px"
-          src="https://open.spotify.com/embed/playlist/2gGTROyeKdYx8oZ60un1GU?utm_source=generator"
-          width="100%"
-          height="352"
-          frameborder="0"
-          allowfullscreen=""
-          allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-          loading="lazy">
-        </iframe>
-      </div>
-    </section>
-
-    <section class="card requests-card">
-      <div class="section-heading-row">
-        <div>
-          <h2>Unapproved Student Requests</h2>
-          <p class="muted">
-            Loaded from the Google Form responses tab. Column C is used as the Spotify link.
-          </p>
+          <div class="hero-actions">
+            <button id="btnLogin" class="btn btn-primary">Login to Spotify</button>
+            <button id="btnLogout" class="btn">Logout</button>
+            <button id="btnLoadRequests" class="btn">Load Requests</button>
+          </div>
         </div>
 
-        <div class="filter-row">
-          <label class="checkbox-wrap">
-            <input type="checkbox" id="hideExplicitOnly" checked />
-            <span>Hide explicit songs</span>
+        <div id="status" class="status-pill">Ready.</div>
+      </section>
+
+      <section class="card now-playing-card">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Live Playback</p>
+            <h2>Now Playing</h2>
+          </div>
+          <button id="btnRefreshPlayback" class="btn btn-small">Refresh</button>
+        </div>
+
+        <div class="media-card media-card-large">
+          <img id="nowPlayingArt" class="media-art large" alt="Now playing artwork" />
+          <div class="media-copy">
+            <div id="nowPlaying" class="media-title">Nothing currently loaded</div>
+            <div id="nowPlayingMeta" class="media-meta">Waiting for playback data...</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card up-next-card">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Queue Preview</p>
+            <h2>Up Next</h2>
+          </div>
+
+          <div class="queue-nav">
+            <button id="btnPrevQueue" class="btn btn-small">Prev</button>
+            <button id="btnNextQueue" class="btn btn-small">Next</button>
+          </div>
+        </div>
+
+        <div class="media-card">
+          <img id="upNextArt" class="media-art" alt="Up next artwork" />
+          <div class="media-copy">
+            <div id="upNext" class="media-title">No approved songs yet</div>
+            <div class="media-meta">Approved selection preview</div>
+          </div>
+        </div>
+
+        <div class="control-row">
+          <button id="btnPlayApproved" class="btn btn-primary">Play Approved</button>
+          <button id="btnAddApprovedToQueue" class="btn">Add Approved to Queue</button>
+        </div>
+      </section>
+
+      <section class="card approved-card">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Moderator Queue</p>
+            <h2>Approved Songs</h2>
+          </div>
+        </div>
+
+        <div id="approvedQueueList" class="queue-list"></div>
+      </section>
+
+      <section class="card requests-card">
+        <div class="section-heading requests-heading">
+          <div>
+            <p class="section-kicker">Moderation</p>
+            <h2>Unapproved Student Requests</h2>
+          </div>
+
+          <label class="toggle-row">
+            <input type="checkbox" id="hideExplicitOnly" />
+            <span>Hide explicit</span>
           </label>
         </div>
-      </div>
 
-      <div id="requestSummary" class="summary-bar">
-        No requests loaded yet.
-      </div>
-
-      <div class="table-wrap">
-        <table class="request-table">
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>Requested Song</th>
-              <th>Spotify Match</th>
-              <th>Length</th>
-              <th>Status</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody id="requestTableBody">
-            <tr>
-              <td colspan="6" class="empty-cell">Load requests to begin.</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <section class="card approved-card">
-      <div class="section-heading-row">
-        <div>
-          <h2>Approved Songs</h2>
-          <p class="muted">
-            Songs you approve stay here for playback and queue control.
-          </p>
-        </div>
-      </div>
-
-      <ol id="approvedQueueList" class="approved-list">
-        <li class="empty-item">No approved songs yet.</li>
-      </ol>
-    </section>
-  </main>
+        <div id="requestSummary" class="summary-text"></div>
+        <div id="requestTableBody" class="requests-list"></div>
+      </section>
+    </main>
+  </div>
 
   <script src="app.js"></script>
 </body>
