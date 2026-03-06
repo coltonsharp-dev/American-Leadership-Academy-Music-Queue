@@ -1,6 +1,6 @@
 // ======================================================
 // ALA Music Requester
-// Full corrected app.js
+// Full compiled app.js
 // ======================================================
 
 // --------------------
@@ -52,7 +52,10 @@ const el = {
   status: document.getElementById("status"),
   nowPlaying: document.getElementById("nowPlaying"),
   nowPlayingMeta: document.getElementById("nowPlayingMeta"),
+  nowPlayingArt: document.getElementById("nowPlayingArt"),
+
   upNext: document.getElementById("upNext"),
+  upNextArt: document.getElementById("upNextArt"),
 
   hideExplicitOnly: document.getElementById("hideExplicitOnly"),
   requestSummary: document.getElementById("requestSummary"),
@@ -166,6 +169,7 @@ function clampQueuePointer() {
     setQueuePointer(0);
     return 0;
   }
+
   const current = getQueuePointer();
   const clamped = Math.min(current, queue.length - 1);
   setQueuePointer(clamped);
@@ -502,10 +506,6 @@ async function ensureActiveDevice() {
   return controllable;
 }
 
-async function getPlaylist(playlistId) {
-  return spotifyFetch(`/playlists/${playlistId}`);
-}
-
 async function addTrackToPlaylist(trackUri) {
   try {
     return await spotifyFetch(`/playlists/${CONFIG.playlistId}/tracks`, {
@@ -522,9 +522,7 @@ async function addTrackToPlaylist(trackUri) {
     }
 
     if (msg.includes("404")) {
-      throw new Error(
-        "Playlist not found. Double-check the playlistId in CONFIG."
-      );
+      throw new Error("Playlist not found. Double-check the playlistId in CONFIG.");
     }
 
     throw error;
@@ -712,21 +710,21 @@ async function enrichRequestRows(rows) {
       const track = await getTrackById(trackId);
 
       result.spotify = {
-  id: track.id,
-  uri: track.uri,
-  name: track.name,
-  artist: track.artists?.map((a) => a.name).join(", ") || "",
-  explicit: !!track.explicit,
-  durationMs: track.duration_ms,
-  externalUrl: track.external_urls?.spotify || spotifyTrackUrl(track.id),
-  album: track.album?.name || "",
-  image:
-    track.album?.images?.[0]?.url ||
-    track.album?.images?.[1]?.url ||
-    track.album?.images?.[2]?.url ||
-    "",
-  previewUrl: track.preview_url || ""
-};
+        id: track.id,
+        uri: track.uri,
+        name: track.name,
+        artist: track.artists?.map((a) => a.name).join(", ") || "",
+        explicit: !!track.explicit,
+        durationMs: track.duration_ms,
+        externalUrl: track.external_urls?.spotify || spotifyTrackUrl(track.id),
+        album: track.album?.name || "",
+        image:
+          track.album?.images?.[0]?.url ||
+          track.album?.images?.[1]?.url ||
+          track.album?.images?.[2]?.url ||
+          "",
+        previewUrl: track.preview_url || ""
+      };
     } catch (error) {
       result.error = error?.message || "Spotify lookup failed";
     }
@@ -839,43 +837,74 @@ function renderRequests(requests) {
 
   if (!visibleRequests.length) {
     el.requestTableBody.innerHTML = `
-      <tr>
-        <td colspan="6">No unapproved requests available with the current filter.</td>
-      </tr>
+      <div class="empty-state">
+        No unapproved requests available with the current filter.
+      </div>
     `;
     return;
   }
 
   el.requestTableBody.innerHTML = visibleRequests
     .map((request) => {
-      const requestedSong = request.spotify
-        ? `${escapeHtml(request.spotify.artist)} — ${escapeHtml(request.spotify.name)}`
-        : "Unknown track";
+      const songTitle = request.spotify?.name || "Unknown track";
+      const artistName = request.spotify?.artist || "Unknown artist";
+      const image = request.spotify?.image || "";
+      const album = request.spotify?.album || "Unknown Album";
+      const explicitClass = request.spotify
+        ? request.spotify.explicit
+          ? "badge-explicit"
+          : "badge-clean"
+        : "badge-error";
 
-      const spotifyMatch = request.spotify
-        ? `<a href="${escapeHtml(request.spotify.externalUrl)}" target="_blank" rel="noopener noreferrer">Open in Spotify</a>`
-        : `<span>${escapeHtml(request.error || "No match")}</span>`;
-
-      const lengthText = request.spotify ? msToMinSec(request.spotify.durationMs) : "—";
+      const explicitText = request.spotify
+        ? request.spotify.explicit
+          ? "Explicit"
+          : "Clean"
+        : "Error";
 
       const approveDisabled = !request.spotify || request.spotify.explicit ? "disabled" : "";
 
       return `
-        <tr>
-          <td>${escapeHtml(request.timestamp || "—")}</td>
-          <td>${escapeHtml(requestedSong)}</td>
-          <td>${spotifyMatch}</td>
-          <td>${escapeHtml(lengthText)}</td>
-          <td>${getStatusBadgeHtml(request)}</td>
-          <td>
+        <div class="request-item">
+          <div class="request-art-wrap">
+            ${
+              image
+                ? `<img class="request-art" src="${escapeHtml(image)}" alt="${escapeHtml(songTitle)} cover art">`
+                : `<div class="request-art request-art-placeholder">No Art</div>`
+            }
+          </div>
+
+          <div class="request-main">
+            <div class="request-title-row">
+              <div class="request-song">${escapeHtml(songTitle)}</div>
+              <span class="badge ${explicitClass}">${explicitText}</span>
+            </div>
+
+            <div class="request-artist">${escapeHtml(artistName)}</div>
+            <div class="request-meta">
+              ${escapeHtml(album)} • ${request.spotify ? escapeHtml(msToMinSec(request.spotify.durationMs)) : "—"}
+            </div>
+            <div class="request-submitted">
+              ${escapeHtml(request.timestamp || "—")}
+            </div>
+          </div>
+
+          <div class="request-actions">
+            ${
+              request.spotify
+                ? `<a class="ghost-btn" href="${escapeHtml(request.spotify.externalUrl)}" target="_blank" rel="noopener noreferrer">Open in Spotify</a>`
+                : `<span class="error-text">${escapeHtml(request.error || "No match")}</span>`
+            }
+
             <button class="approve-btn" data-request-id="${escapeHtml(request.requestId)}" ${approveDisabled}>
               Approve
             </button>
+
             <button class="reject-btn" data-request-id="${escapeHtml(request.requestId)}">
               Reject
             </button>
-          </td>
-        </tr>
+          </div>
+        </div>
       `;
     })
     .join("");
@@ -891,7 +920,7 @@ function renderApprovedQueue() {
   clampQueuePointer();
 
   if (!queue.length) {
-    el.approvedQueueList.innerHTML = `<li>No approved songs yet.</li>`;
+    el.approvedQueueList.innerHTML = `<div class="empty-state">No approved songs yet.</div>`;
     updateUpNext();
     return;
   }
@@ -900,21 +929,35 @@ function renderApprovedQueue() {
 
   el.approvedQueueList.innerHTML = queue
     .map((item, index) => {
-      const active = index === pointer ? " style='font-weight:700;'" : "";
+      const activeClass = index === pointer ? " queue-item-active" : "";
       const artist = item.spotify?.artist || "Unknown Artist";
       const name = item.spotify?.name || "Unknown Song";
-      const label = `${artist} — ${name}`;
+      const image = item.spotify?.image || "";
 
       return `
-        <li${active}>
-          <span>${escapeHtml(label)}</span>
-          <button class="remove-approved-btn" data-request-id="${escapeHtml(item.requestId)}">
-            Remove
-          </button>
-          <button class="add-playlist-btn" data-request-id="${escapeHtml(item.requestId)}">
-            Add to Playlist
-          </button>
-        </li>
+        <div class="queue-item${activeClass}">
+          <div class="queue-item-art-wrap">
+            ${
+              image
+                ? `<img class="queue-item-art" src="${escapeHtml(image)}" alt="${escapeHtml(name)} cover art">`
+                : `<div class="queue-item-art queue-item-art-placeholder">No Art</div>`
+            }
+          </div>
+
+          <div class="queue-item-main">
+            <div class="queue-item-title">${escapeHtml(name)}</div>
+            <div class="queue-item-artist">${escapeHtml(artist)}</div>
+          </div>
+
+          <div class="queue-item-actions">
+            <button class="remove-approved-btn" data-request-id="${escapeHtml(item.requestId)}">
+              Remove
+            </button>
+            <button class="add-playlist-btn" data-request-id="${escapeHtml(item.requestId)}">
+              Add to Playlist
+            </button>
+          </div>
+        </div>
       `;
     })
     .join("");
@@ -929,6 +972,11 @@ function updateUpNext() {
 
   if (!queue.length) {
     el.upNext.textContent = "No approved songs yet";
+
+    if (el.upNextArt) {
+      el.upNextArt.src = "";
+      el.upNextArt.style.visibility = "hidden";
+    }
     return;
   }
 
@@ -937,10 +985,21 @@ function updateUpNext() {
 
   if (!current?.spotify) {
     el.upNext.textContent = "No approved songs yet";
+
+    if (el.upNextArt) {
+      el.upNextArt.src = "";
+      el.upNextArt.style.visibility = "hidden";
+    }
     return;
   }
 
   el.upNext.textContent = `${current.spotify.artist} — ${current.spotify.name}`;
+
+  if (el.upNextArt) {
+    el.upNextArt.src = current.spotify.image || "";
+    el.upNextArt.alt = `${current.spotify.name} cover art`;
+    el.upNextArt.style.visibility = current.spotify.image ? "visible" : "hidden";
+  }
 }
 
 // ======================================================
@@ -955,18 +1014,39 @@ async function refreshPlayback() {
     if (!data || !data.item) {
       el.nowPlaying.textContent = "Nothing currently loaded";
       el.nowPlayingMeta.textContent = "Waiting for playback data...";
+
+      if (el.nowPlayingArt) {
+        el.nowPlayingArt.src = "";
+        el.nowPlayingArt.style.visibility = "hidden";
+      }
       return;
     }
 
     const item = data.item;
     const artists = item.artists?.map((a) => a.name).join(", ") || "Unknown Artist";
+    const image =
+      item.album?.images?.[0]?.url ||
+      item.album?.images?.[1]?.url ||
+      item.album?.images?.[2]?.url ||
+      "";
 
     el.nowPlaying.textContent = `${artists} — ${item.name}`;
     el.nowPlayingMeta.textContent =
       `${item.album?.name || "Unknown Album"} | ${msToMinSec(item.duration_ms)}`;
+
+    if (el.nowPlayingArt) {
+      el.nowPlayingArt.src = image;
+      el.nowPlayingArt.alt = `${item.name} cover art`;
+      el.nowPlayingArt.style.visibility = image ? "visible" : "hidden";
+    }
   } catch (error) {
     el.nowPlaying.textContent = "Nothing currently loaded";
     el.nowPlayingMeta.textContent = error?.message || "Playback unavailable";
+
+    if (el.nowPlayingArt) {
+      el.nowPlayingArt.src = "";
+      el.nowPlayingArt.style.visibility = "hidden";
+    }
   }
 }
 
