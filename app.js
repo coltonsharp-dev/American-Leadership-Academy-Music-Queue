@@ -1,6 +1,6 @@
 // ======================================================
 // ALA Music Requester
-// Full compiled app.js with playlist access verification
+// Full compiled app.js with scope diagnostics
 // ======================================================
 
 // --------------------
@@ -31,6 +31,7 @@ const LS = {
   accessToken: "ala_access_token",
   refreshToken: "ala_refresh_token",
   expiresAt: "ala_expires_at",
+  grantedScopes: "ala_granted_scopes",
   approvedQueue: "ala_approved_queue",
   rejectedIds: "ala_rejected_ids",
   queuePointer: "ala_queue_pointer"
@@ -119,6 +120,21 @@ function buildRequestId(row) {
 
 function normalizeSpotifyUserId(value) {
   return String(value ?? "").trim().toLowerCase();
+}
+
+function parseScopes(scopeString) {
+  return String(scopeString || "")
+    .split(/\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function getGrantedScopes() {
+  return parseScopes(localStorage.getItem(LS.grantedScopes) || "");
+}
+
+function hasGrantedScope(scope) {
+  return getGrantedScopes().includes(scope);
 }
 
 // ======================================================
@@ -357,6 +373,9 @@ async function handleSpotifyCallback() {
     LS.expiresAt,
     String(Date.now() + json.expires_in * 1000 - 30000)
   );
+  localStorage.setItem(LS.grantedScopes, json.scope || "");
+
+  console.log("Granted scopes on login:", parseScopes(json.scope || ""));
 
   url.searchParams.delete("code");
   url.searchParams.delete("state");
@@ -404,6 +423,11 @@ async function getAccessToken() {
     String(Date.now() + json.expires_in * 1000 - 30000)
   );
 
+  if (json.scope) {
+    localStorage.setItem(LS.grantedScopes, json.scope);
+    console.log("Granted scopes on refresh:", parseScopes(json.scope));
+  }
+
   return json.access_token;
 }
 
@@ -412,6 +436,7 @@ function logoutSpotify() {
   localStorage.removeItem(LS.refreshToken);
   localStorage.removeItem(LS.expiresAt);
   localStorage.removeItem(LS.pkceVerifier);
+  localStorage.removeItem(LS.grantedScopes);
   setStatus("Logged out of Spotify.");
 }
 
@@ -535,12 +560,18 @@ async function verifyPlaylistAccess() {
 
     const isOwner = currentUserId && ownerUserId && currentUserId === ownerUserId;
 
+    const scopes = getGrantedScopes();
+    const hasPublicScope = scopes.includes("playlist-modify-public");
+    const hasPrivateScope = scopes.includes("playlist-modify-private");
+
     const messageParts = [
       `Logged in as: ${currentDisplay}`,
       `Playlist owner: ${ownerDisplay}`,
       `Playlist name: ${playlist?.name || "Unknown playlist"}`,
       `Collaborative: ${collaborative ? "Yes" : "No"}`,
-      `Public: ${publicState}`
+      `Public: ${publicState}`,
+      `Has playlist-modify-public: ${hasPublicScope ? "Yes" : "No"}`,
+      `Has playlist-modify-private: ${hasPrivateScope ? "Yes" : "No"}`
     ];
 
     if (isOwner) {
@@ -555,21 +586,35 @@ async function verifyPlaylistAccess() {
       );
     }
 
+    if (playlist?.public === true && !hasPublicScope) {
+      messageParts.push("Scope check: Missing playlist-modify-public.");
+    }
+
+    if (playlist?.public === false && !hasPrivateScope) {
+      messageParts.push("Scope check: Missing playlist-modify-private.");
+    }
+
     const finalMessage = messageParts.join(" | ");
     setStatus(finalMessage);
 
     console.log("Playlist access check:", {
       loggedInUser: me,
       playlist,
+      grantedScopes: scopes,
       isOwner,
-      collaborative
+      collaborative,
+      hasPublicScope,
+      hasPrivateScope
     });
 
     return {
       me,
       playlist,
+      grantedScopes: scopes,
       isOwner,
-      collaborative
+      collaborative,
+      hasPublicScope,
+      hasPrivateScope
     };
   } catch (error) {
     console.error("verifyPlaylistAccess failed:", error);
@@ -586,11 +631,23 @@ async function addTrackToPlaylist(trackUri) {
       throw new Error("Could not verify playlist access.");
     }
 
-    const { isOwner, collaborative } = accessInfo;
+    const { playlist, isOwner, collaborative, hasPublicScope, hasPrivateScope } = accessInfo;
 
     if (!isOwner && !collaborative) {
       throw new Error(
         "Spotify blocked Add to Playlist because the logged-in account does not own this playlist and the playlist is not collaborative."
+      );
+    }
+
+    if (playlist?.public === true && !hasPublicScope) {
+      throw new Error(
+        "Missing required scope: playlist-modify-public. Log out, clear site storage, revoke the app in Spotify, and log back in."
+      );
+    }
+
+    if (playlist?.public === false && !hasPrivateScope) {
+      throw new Error(
+        "Missing required scope: playlist-modify-private. Log out, clear site storage, revoke the app in Spotify, and log back in."
       );
     }
 
@@ -603,7 +660,7 @@ async function addTrackToPlaylist(trackUri) {
 
     if (msg.includes("403")) {
       throw new Error(
-        "Spotify blocked Add to Playlist. The logged-in Spotify account may not own this playlist, may not have edit access, or your token may need to be refreshed by logging out and back in."
+        "Spotify still returned 403 on Add to Playlist. Most likely causes now are stale consent/scopes, an old refresh token, or Spotify app authorization that needs to be revoked and re-approved."
       );
     }
 
