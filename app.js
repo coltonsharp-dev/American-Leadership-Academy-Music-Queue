@@ -1,6 +1,6 @@
 // ======================================================
-// ALA Music Requester
-// Full compiled app.js with scope diagnostics
+// ALA Music Requester Dashboard
+// Final cleaned moderation-only app.js
 // ======================================================
 
 // --------------------
@@ -9,16 +9,12 @@
 const CONFIG = {
   clientId: "cbfd828db1414a2183039d01ceeaf181",
   redirectUri: "https://coltonsharp-dev.github.io/American-Leadership-Academy-Music-Queue/",
-  playlistId: "6tUvxIVcO3SDL8YCmTUQjc",
   requestsCsvUrl:
     "https://docs.google.com/spreadsheets/d/e/2PACX-1vQyc3RRDmjc-nN-XgMMDocbnn1tlxue5ynNoNnYSxnRKxgp2LRGNmYZXnVgAFLH7IViwTAtmIAkvDsK/pub?output=csv",
   scopes: [
     "user-read-private",
     "user-read-email",
-    "user-read-playback-state",
-    "user-modify-playback-state",
-    "playlist-modify-public",
-    "playlist-modify-private"
+    "user-read-playback-state"
   ],
   playbackPollMs: 15000
 };
@@ -27,11 +23,10 @@ const CONFIG = {
 // LOCAL STORAGE KEYS
 // --------------------
 const LS = {
-  pkceVerifier: "ala_pkce_verifier",
-  accessToken: "ala_access_token",
-  refreshToken: "ala_refresh_token",
-  expiresAt: "ala_expires_at",
-  grantedScopes: "ala_granted_scopes",
+  pkceVerifier: "ala_dash_pkce_verifier",
+  accessToken: "ala_dash_access_token",
+  refreshToken: "ala_dash_refresh_token",
+  expiresAt: "ala_dash_expires_at",
   approvedQueue: "ala_approved_queue",
   rejectedIds: "ala_rejected_ids",
   queuePointer: "ala_queue_pointer"
@@ -47,9 +42,6 @@ const el = {
   btnRefreshPlayback: document.getElementById("btnRefreshPlayback"),
   btnPrevQueue: document.getElementById("btnPrevQueue"),
   btnNextQueue: document.getElementById("btnNextQueue"),
-  btnPlayApproved: document.getElementById("btnPlayApproved"),
-  btnAddApprovedToQueue: document.getElementById("btnAddApprovedToQueue"),
-  btnVerifyPlaylistAccess: document.getElementById("btnVerifyPlaylistAccess"),
 
   status: document.getElementById("status"),
   nowPlaying: document.getElementById("nowPlaying"),
@@ -116,25 +108,6 @@ function normalizeHeader(value) {
 
 function buildRequestId(row) {
   return [row.timestamp || "", row.email || "", row.spotifyLink || ""].join("|");
-}
-
-function normalizeSpotifyUserId(value) {
-  return String(value ?? "").trim().toLowerCase();
-}
-
-function parseScopes(scopeString) {
-  return String(scopeString || "")
-    .split(/\s+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
-function getGrantedScopes() {
-  return parseScopes(localStorage.getItem(LS.grantedScopes) || "");
-}
-
-function hasGrantedScope(scope) {
-  return getGrantedScopes().includes(scope);
 }
 
 // ======================================================
@@ -373,9 +346,6 @@ async function handleSpotifyCallback() {
     LS.expiresAt,
     String(Date.now() + json.expires_in * 1000 - 30000)
   );
-  localStorage.setItem(LS.grantedScopes, json.scope || "");
-
-  console.log("Granted scopes on login:", parseScopes(json.scope || ""));
 
   url.searchParams.delete("code");
   url.searchParams.delete("state");
@@ -423,11 +393,6 @@ async function getAccessToken() {
     String(Date.now() + json.expires_in * 1000 - 30000)
   );
 
-  if (json.scope) {
-    localStorage.setItem(LS.grantedScopes, json.scope);
-    console.log("Granted scopes on refresh:", parseScopes(json.scope));
-  }
-
   return json.access_token;
 }
 
@@ -436,7 +401,6 @@ function logoutSpotify() {
   localStorage.removeItem(LS.refreshToken);
   localStorage.removeItem(LS.expiresAt);
   localStorage.removeItem(LS.pkceVerifier);
-  localStorage.removeItem(LS.grantedScopes);
   setStatus("Logged out of Spotify.");
 }
 
@@ -472,10 +436,6 @@ async function getCurrentUserProfile() {
   return spotifyFetch("/me");
 }
 
-async function getPlaylistDetails(playlistId) {
-  return spotifyFetch(`/playlists/${playlistId}`);
-}
-
 async function getTrackById(trackId) {
   return spotifyFetch(`/tracks/${trackId}`);
 }
@@ -486,258 +446,6 @@ async function getCurrentlyPlaying() {
   } catch (error) {
     console.warn("Currently playing unavailable:", error);
     return null;
-  }
-}
-
-async function getAvailableDevices() {
-  return spotifyFetch("/me/player/devices");
-}
-
-async function transferPlaybackToDevice(deviceId, shouldPlay = false) {
-  const token = await getAccessToken();
-  if (!token) throw new Error("Spotify login required.");
-
-  const response = await fetch("https://api.spotify.com/v1/me/player", {
-    method: "PUT",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      device_ids: [deviceId],
-      play: shouldPlay
-    })
-  });
-
-  if (!response.ok && response.status !== 204) {
-    const text = await response.text();
-    throw new Error(`${response.status} ${text}`);
-  }
-}
-
-async function ensureActiveDevice() {
-  const deviceData = await getAvailableDevices();
-  const devices = deviceData?.devices || [];
-
-  if (!devices.length) {
-    throw new Error(
-      "No Spotify devices found. Open Spotify on your phone, desktop app, or web player and start playback first."
-    );
-  }
-
-  const activeDevice = devices.find((d) => d.is_active);
-  if (activeDevice) return activeDevice;
-
-  const controllable = devices.find((d) => !d.is_restricted) || devices[0];
-
-  if (!controllable?.id) {
-    throw new Error(
-      "A Spotify device was found, but it cannot be controlled. Open Spotify and start playback manually first."
-    );
-  }
-
-  await transferPlaybackToDevice(controllable.id, false);
-  return controllable;
-}
-
-async function verifyPlaylistAccess() {
-  try {
-    setStatus("Checking Spotify account and playlist access...");
-
-    const me = await getCurrentUserProfile();
-    const playlist = await getPlaylistDetails(CONFIG.playlistId);
-
-    const currentUserId = normalizeSpotifyUserId(me?.id);
-    const currentDisplay = me?.display_name || me?.id || "Unknown user";
-
-    const ownerUserId = normalizeSpotifyUserId(playlist?.owner?.id);
-    const ownerDisplay =
-      playlist?.owner?.display_name || playlist?.owner?.id || "Unknown owner";
-
-    const collaborative = !!playlist?.collaborative;
-    const publicState =
-      typeof playlist?.public === "boolean" ? String(playlist.public) : "unknown";
-
-    const isOwner = currentUserId && ownerUserId && currentUserId === ownerUserId;
-
-    const scopes = getGrantedScopes();
-    const hasPublicScope = scopes.includes("playlist-modify-public");
-    const hasPrivateScope = scopes.includes("playlist-modify-private");
-
-    const messageParts = [
-      `Logged in as: ${currentDisplay}`,
-      `Playlist owner: ${ownerDisplay}`,
-      `Playlist name: ${playlist?.name || "Unknown playlist"}`,
-      `Collaborative: ${collaborative ? "Yes" : "No"}`,
-      `Public: ${publicState}`,
-      `Has playlist-modify-public: ${hasPublicScope ? "Yes" : "No"}`,
-      `Has playlist-modify-private: ${hasPrivateScope ? "Yes" : "No"}`
-    ];
-
-    if (isOwner) {
-      messageParts.push("Access check: You are the playlist owner.");
-    } else if (collaborative) {
-      messageParts.push(
-        "Access check: You are not the owner. Because the playlist is collaborative, editing may be allowed depending on Spotify account and playlist settings."
-      );
-    } else {
-      messageParts.push(
-        "Access check: You are not the playlist owner, and the playlist is not collaborative. Add to Playlist will likely fail."
-      );
-    }
-
-    if (playlist?.public === true && !hasPublicScope) {
-      messageParts.push("Scope check: Missing playlist-modify-public.");
-    }
-
-    if (playlist?.public === false && !hasPrivateScope) {
-      messageParts.push("Scope check: Missing playlist-modify-private.");
-    }
-
-    const finalMessage = messageParts.join(" | ");
-    setStatus(finalMessage);
-
-    console.log("Playlist access check:", {
-      loggedInUser: me,
-      playlist,
-      grantedScopes: scopes,
-      isOwner,
-      collaborative,
-      hasPublicScope,
-      hasPrivateScope
-    });
-
-    return {
-      me,
-      playlist,
-      grantedScopes: scopes,
-      isOwner,
-      collaborative,
-      hasPublicScope,
-      hasPrivateScope
-    };
-  } catch (error) {
-    console.error("verifyPlaylistAccess failed:", error);
-    setStatus(error?.message || "Playlist access check failed.");
-    return null;
-  }
-}
-
-async function addTrackToPlaylist(trackUri) {
-  try {
-    const accessInfo = await verifyPlaylistAccess();
-
-    if (!accessInfo) {
-      throw new Error("Could not verify playlist access.");
-    }
-
-    const { playlist, isOwner, collaborative, hasPublicScope, hasPrivateScope } = accessInfo;
-
-    if (!isOwner && !collaborative) {
-      throw new Error(
-        "Spotify blocked Add to Playlist because the logged-in account does not own this playlist and the playlist is not collaborative."
-      );
-    }
-
-    if (playlist?.public === true && !hasPublicScope) {
-      throw new Error(
-        "Missing required scope: playlist-modify-public. Log out, clear site storage, revoke the app in Spotify, and log back in."
-      );
-    }
-
-    if (playlist?.public === false && !hasPrivateScope) {
-      throw new Error(
-        "Missing required scope: playlist-modify-private. Log out, clear site storage, revoke the app in Spotify, and log back in."
-      );
-    }
-
-    return await spotifyFetch(`/playlists/${CONFIG.playlistId}/tracks`, {
-      method: "POST",
-      body: JSON.stringify({ uris: [trackUri] })
-    });
-  } catch (error) {
-    const msg = String(error?.message || "");
-
-    if (msg.includes("403")) {
-      throw new Error(
-        "Spotify still returned 403 on Add to Playlist. Most likely causes now are stale consent/scopes, an old refresh token, or Spotify app authorization that needs to be revoked and re-approved."
-      );
-    }
-
-    if (msg.includes("404")) {
-      throw new Error("Playlist not found. Double-check the playlistId in CONFIG.");
-    }
-
-    throw error;
-  }
-}
-
-async function addTrackToSpotifyQueue(trackUri) {
-  const token = await getAccessToken();
-  if (!token) throw new Error("Spotify login required.");
-
-  await ensureActiveDevice();
-
-  const url = new URL("https://api.spotify.com/v1/me/player/queue");
-  url.searchParams.set("uri", trackUri);
-
-  const response = await fetch(url.toString(), {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`
-    }
-  });
-
-  if (!response.ok && response.status !== 204) {
-    const text = await response.text();
-
-    if (response.status === 404 && text.includes("NO_ACTIVE_DEVICE")) {
-      throw new Error(
-        "No active Spotify device found. Open Spotify and start playback on a Premium account, then try again."
-      );
-    }
-
-    if (response.status === 403) {
-      throw new Error(
-        "Spotify blocked Add to Queue. Usually this means the account is not Premium or the player/device cannot be controlled."
-      );
-    }
-
-    throw new Error(`${response.status} ${text}`);
-  }
-}
-
-async function playTrackNow(trackUri) {
-  const token = await getAccessToken();
-  if (!token) throw new Error("Spotify login required.");
-
-  await ensureActiveDevice();
-
-  const response = await fetch("https://api.spotify.com/v1/me/player/play", {
-    method: "PUT",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ uris: [trackUri] })
-  });
-
-  if (!response.ok && response.status !== 204) {
-    const text = await response.text();
-
-    if (response.status === 404 && text.includes("NO_ACTIVE_DEVICE")) {
-      throw new Error(
-        "No active Spotify device found. Open Spotify and start playback first."
-      );
-    }
-
-    if (response.status === 403) {
-      throw new Error(
-        "Spotify blocked playback. Usually this means the logged-in account is not Premium."
-      );
-    }
-
-    throw new Error(`${response.status} ${text}`);
   }
 }
 
@@ -879,7 +587,7 @@ async function enrichRequestRows(rows) {
 }
 
 // ======================================================
-// REQUEST SUMMARY + BADGES
+// REQUEST SUMMARY
 // ======================================================
 function isApproved(requestId) {
   const queue = getApprovedQueue();
@@ -1086,9 +794,6 @@ function renderApprovedQueue() {
             <button class="remove-approved-btn" data-request-id="${escapeHtml(item.requestId)}">
               Remove
             </button>
-            <button class="add-playlist-btn" data-request-id="${escapeHtml(item.requestId)}">
-              Add to Playlist
-            </button>
           </div>
         </div>
       `;
@@ -1136,7 +841,7 @@ function updateUpNext() {
 }
 
 // ======================================================
-// PLAYBACK
+// PLAYBACK PREVIEW
 // ======================================================
 async function refreshPlayback() {
   if (!el.nowPlaying || !el.nowPlayingMeta) return;
@@ -1199,58 +904,6 @@ function moveQueuePointer(delta) {
   renderApprovedQueue();
 }
 
-async function playCurrentApproved() {
-  const queue = getApprovedQueue();
-  if (!queue.length) {
-    setStatus("No approved songs available.");
-    return;
-  }
-
-  const pointer = clampQueuePointer();
-  const item = queue[pointer];
-
-  if (!item?.spotify?.uri) {
-    setStatus("Approved song is missing Spotify track data.");
-    return;
-  }
-
-  await playTrackNow(item.spotify.uri);
-  setStatus(`Playing now: ${item.spotify.artist} — ${item.spotify.name}`);
-  await refreshPlayback();
-}
-
-async function addCurrentApprovedToQueue() {
-  const queue = getApprovedQueue();
-  if (!queue.length) {
-    setStatus("No approved songs available.");
-    return;
-  }
-
-  const pointer = clampQueuePointer();
-  const item = queue[pointer];
-
-  if (!item?.spotify?.uri) {
-    setStatus("Approved song is missing Spotify track data.");
-    return;
-  }
-
-  await addTrackToSpotifyQueue(item.spotify.uri);
-  setStatus(`Added to Spotify queue: ${item.spotify.artist} — ${item.spotify.name}`);
-}
-
-async function addApprovedSongToPlaylist(requestId) {
-  const queue = getApprovedQueue();
-  const item = queue.find((q) => q.requestId === requestId);
-
-  if (!item?.spotify?.uri) {
-    setStatus("Could not add song to playlist.");
-    return;
-  }
-
-  await addTrackToPlaylist(item.spotify.uri);
-  setStatus(`Added to playlist: ${item.spotify.artist} — ${item.spotify.name}`);
-}
-
 // ======================================================
 // LOAD REQUESTS
 // ======================================================
@@ -1295,15 +948,6 @@ function wireStaticEvents() {
     }
   });
 
-  el.btnVerifyPlaylistAccess?.addEventListener("click", async () => {
-    try {
-      await verifyPlaylistAccess();
-    } catch (error) {
-      console.error(error);
-      setStatus(error?.message || "Could not verify playlist access.");
-    }
-  });
-
   el.btnRefreshPlayback?.addEventListener("click", async () => {
     try {
       await refreshPlayback();
@@ -1319,24 +963,6 @@ function wireStaticEvents() {
 
   el.btnNextQueue?.addEventListener("click", () => {
     moveQueuePointer(1);
-  });
-
-  el.btnPlayApproved?.addEventListener("click", async () => {
-    try {
-      await playCurrentApproved();
-    } catch (error) {
-      console.error(error);
-      setStatus(error?.message || "Could not play approved song.");
-    }
-  });
-
-  el.btnAddApprovedToQueue?.addEventListener("click", async () => {
-    try {
-      await addCurrentApprovedToQueue();
-    } catch (error) {
-      console.error(error);
-      setStatus(error?.message || "Could not add approved song to Spotify queue.");
-    }
   });
 
   el.hideExplicitOnly?.addEventListener("change", () => {
@@ -1363,20 +989,9 @@ function wireStaticEvents() {
 
   el.approvedQueueList?.addEventListener("click", async (event) => {
     const removeButton = event.target.closest(".remove-approved-btn");
-    const addToPlaylistButton = event.target.closest(".add-playlist-btn");
 
     if (removeButton) {
       removeApproved(removeButton.dataset.requestId);
-      return;
-    }
-
-    if (addToPlaylistButton) {
-      try {
-        await addApprovedSongToPlaylist(addToPlaylistButton.dataset.requestId);
-      } catch (error) {
-        console.error(error);
-        setStatus(error?.message || "Could not add song to playlist.");
-      }
     }
   });
 }
