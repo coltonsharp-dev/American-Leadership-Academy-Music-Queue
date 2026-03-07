@@ -27,15 +27,13 @@
             <h1>Music Queue Dashboard</h1>
             <p class="hero-sub">
               Review student song requests, verify album art, approve clean tracks,
-              and control the live queue with confidence.
+              and send the DJ to the dedicated player page for live playback control.
             </p>
           </div>
 
           <div class="hero-actions">
-            <button id="btnVerifyPlaylistAccess" class="btn" type="button">
-              Verify Playlist Access
-            </button>
-            <button id="btnLogin" class="btn btn-primary" type="button">
+            <a href="player.html" class="btn btn-primary">Open DJ Player</a>
+            <button id="btnLogin" class="btn" type="button">
               Login to Spotify
             </button>
             <button id="btnLogout" class="btn" type="button">
@@ -53,7 +51,7 @@
       <section class="card now-playing-card">
         <div class="section-heading">
           <div>
-            <p class="section-kicker">Live Playback</p>
+            <p class="section-kicker">Live Playback Preview</p>
             <h2>Now Playing</h2>
           </div>
 
@@ -81,7 +79,7 @@
       <section class="card up-next-card">
         <div class="section-heading">
           <div>
-            <p class="section-kicker">Queue Preview</p>
+            <p class="section-kicker">Approval Preview</p>
             <h2>Up Next</h2>
           </div>
 
@@ -104,17 +102,10 @@
           />
           <div class="media-copy">
             <div id="upNext" class="media-title">No approved songs yet</div>
-            <div class="media-meta">Approved selection preview</div>
+            <div class="media-meta">
+              Preview the next approved song, then queue it from the DJ Player page.
+            </div>
           </div>
-        </div>
-
-        <div class="control-row">
-          <button id="btnPlayApproved" class="btn btn-primary" type="button">
-            Play Approved
-          </button>
-          <button id="btnAddApprovedToQueue" class="btn" type="button">
-            Add Approved to Queue
-          </button>
         </div>
       </section>
 
