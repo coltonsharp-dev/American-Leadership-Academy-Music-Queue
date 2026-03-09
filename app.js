@@ -8,7 +8,7 @@
 // --------------------
 const CONFIG = {
   clientId: "cbfd828db1414a2183039d01ceeaf181",
-  redirectUri: "https://coltonsharp-dev.github.io/American-Leadership-Academy-Music-Queue/",
+  redirectUriFallback: "https://coltonsharp-dev.github.io/American-Leadership-Academy-Music-Queue/",
   defaultPlaylistId: "3dcGJ6miJHVxZkQEIwGog5",
   requestsCsvUrl:
     "https://docs.google.com/spreadsheets/d/e/2PACX-1vQyc3RRDmjc-nN-XgMMDocbnn1tlxue5ynNoNnYSxnRKxgp2LRGNmYZXnVgAFLH7IViwTAtmIAkvDsK/pub?output=csv",
@@ -19,7 +19,10 @@ const CONFIG = {
     "user-modify-playback-state",
     "user-read-currently-playing"
   ],
-  playbackPollMs: 15000
+  playbackPollMs: 15000,
+  trackLookupConcurrency: 5,
+  trackLookupRetryCount: 2,
+  trackLookupRetryDelayMs: 500
 };
 
 // --------------------
@@ -27,6 +30,7 @@ const CONFIG = {
 // --------------------
 const LS = {
   pkceVerifier: "ala_dash_pkce_verifier",
+  oauthState: "ala_dash_oauth_state",
   accessToken: "ala_dash_access_token",
   refreshToken: "ala_dash_refresh_token",
   expiresAt: "ala_dash_expires_at",
@@ -47,6 +51,8 @@ const el = {
   btnNextQueue: document.getElementById("btnNextQueue"),
   btnStartDefaultPlaylist: document.getElementById("btnStartDefaultPlaylist"),
   btnAddApprovedToQueue: document.getElementById("btnAddApprovedToQueue"),
+  btnApproveAllCleanVisible: document.getElementById("btnApproveAllCleanVisible"),
+  btnUndoModerationAction: document.getElementById("btnUndoModerationAction"),
 
   status: document.getElementById("status"),
   nowPlaying: document.getElementById("nowPlaying"),
@@ -66,6 +72,8 @@ const el = {
 // --------------------
 let currentRequests = [];
 let playbackTimer = null;
+const moderationHistory = [];
+let isUndoingModeration = false;
 
 // ======================================================
 // BASIC HELPERS
@@ -116,6 +124,49 @@ function buildRequestId(row) {
 
 function isTrackObject(item) {
   return !!item && item.type === "track";
+}
+
+function getRedirectUri() {
+  if (!window?.location?.origin || !window?.location?.pathname) {
+    return CONFIG.redirectUriFallback;
+  }
+
+  const path = window.location.pathname.endsWith(".html")
+    ? window.location.pathname.replace(/[^/]+$/, "")
+    : window.location.pathname;
+
+  return `${window.location.origin}${path}`;
+}
+
+function wait(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function getErrorStatusCode(error) {
+  const message = String(error?.message || "");
+  const match = message.match(/^(\d{3})\b/);
+  if (!match) return null;
+  return Number(match[1]);
+}
+
+function pushModerationHistory(action) {
+  if (isUndoingModeration) return;
+  moderationHistory.push(action);
+  if (moderationHistory.length > 100) {
+    moderationHistory.shift();
+  }
+}
+
+function getVisibleUnapprovedRequests(requests) {
+  const hideExplicit = !!el.hideExplicitOnly?.checked;
+  const rejected = getRejectedIds();
+
+  return requests.filter((request) => {
+    if (rejected.has(request.requestId)) return false;
+    if (isApproved(request.requestId)) return false;
+    if (hideExplicit && request.spotify && request.spotify.explicit === true) return false;
+    return true;
+  });
 }
 
 // ======================================================
@@ -287,17 +338,20 @@ async function loginToSpotify() {
   setStatus("Starting Spotify login...");
 
   const verifier = randomString(64);
+  const state = randomString(32);
   const challenge = await createCodeChallenge(verifier);
 
   localStorage.setItem(LS.pkceVerifier, verifier);
+  localStorage.setItem(LS.oauthState, state);
 
   const params = new URLSearchParams({
     client_id: CONFIG.clientId,
     response_type: "code",
-    redirect_uri: CONFIG.redirectUri,
+    redirect_uri: getRedirectUri(),
     code_challenge_method: "S256",
     code_challenge: challenge,
     scope: CONFIG.scopes.join(" "),
+    state,
     show_dialog: "true"
   });
 
@@ -307,6 +361,7 @@ async function loginToSpotify() {
 async function handleSpotifyCallback() {
   const url = new URL(window.location.href);
   const code = url.searchParams.get("code");
+  const returnedState = url.searchParams.get("state");
   const error = url.searchParams.get("error");
 
   if (error) {
@@ -315,6 +370,11 @@ async function handleSpotifyCallback() {
   }
 
   if (!code) return;
+
+  const expectedState = localStorage.getItem(LS.oauthState);
+  if (!expectedState || !returnedState || expectedState !== returnedState) {
+    throw new Error("Spotify login state mismatch. Please try logging in again.");
+  }
 
   const verifier = localStorage.getItem(LS.pkceVerifier);
   if (!verifier) {
@@ -328,7 +388,7 @@ async function handleSpotifyCallback() {
     client_id: CONFIG.clientId,
     grant_type: "authorization_code",
     code,
-    redirect_uri: CONFIG.redirectUri,
+    redirect_uri: getRedirectUri(),
     code_verifier: verifier
   });
 
@@ -359,6 +419,7 @@ async function handleSpotifyCallback() {
   url.searchParams.delete("code");
   url.searchParams.delete("state");
   window.history.replaceState({}, document.title, url.toString());
+  localStorage.removeItem(LS.oauthState);
 
   setStatus("Spotify login successful.");
 }
@@ -410,7 +471,30 @@ function logoutSpotify() {
   localStorage.removeItem(LS.refreshToken);
   localStorage.removeItem(LS.expiresAt);
   localStorage.removeItem(LS.pkceVerifier);
+  localStorage.removeItem(LS.oauthState);
   setStatus("Logged out of Spotify.");
+}
+
+async function getTrackByIdWithRetry(trackId) {
+  const maxAttempts = Math.max(1, CONFIG.trackLookupRetryCount + 1);
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await getTrackById(trackId);
+    } catch (error) {
+      const statusCode = getErrorStatusCode(error);
+      const isLastAttempt = attempt === maxAttempts;
+
+      if (statusCode === 429 && !isLastAttempt) {
+        await wait(CONFIG.trackLookupRetryDelayMs * attempt);
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  throw new Error("Track lookup failed unexpectedly.");
 }
 
 // ======================================================
@@ -626,52 +710,67 @@ async function fetchStudentRequestRows() {
 
 async function enrichRequestRows(rows) {
   const rejected = getRejectedIds();
-  const enriched = [];
+  const enriched = new Array(rows.length);
+  let cursor = 0;
 
-  for (const row of rows) {
-    const requestId = buildRequestId(row);
-    const trackId = extractSpotifyTrackId(row.spotifyLink);
+  async function worker() {
+    while (true) {
+      const index = cursor;
+      cursor += 1;
 
-    const result = {
-      ...row,
-      requestId,
-      trackId,
-      rejected: rejected.has(requestId),
-      spotify: null,
-      error: null
-    };
+      if (index >= rows.length) return;
 
-    if (!trackId) {
-      result.error = "Invalid or missing Spotify track link";
-      enriched.push(result);
-      continue;
-    }
+      const row = rows[index];
+      const requestId = buildRequestId(row);
+      const trackId = extractSpotifyTrackId(row.spotifyLink);
 
-    try {
-      const track = await getTrackById(trackId);
-
-      result.spotify = {
-        id: track.id,
-        uri: track.uri,
-        name: track.name,
-        artist: track.artists?.map((a) => a.name).join(", ") || "",
-        explicit: !!track.explicit,
-        durationMs: track.duration_ms,
-        externalUrl: track.external_urls?.spotify || spotifyTrackUrl(track.id),
-        album: track.album?.name || "",
-        image:
-          track.album?.images?.[0]?.url ||
-          track.album?.images?.[1]?.url ||
-          track.album?.images?.[2]?.url ||
-          ""
+      const result = {
+        ...row,
+        requestId,
+        trackId,
+        rejected: rejected.has(requestId),
+        spotify: null,
+        error: null
       };
-    } catch (error) {
-      result.error = error?.message || "Spotify lookup failed";
-    }
 
-    enriched.push(result);
+      if (!trackId) {
+        result.error = "Invalid or missing Spotify track link";
+        enriched[index] = result;
+        continue;
+      }
+
+      try {
+        const track = await getTrackByIdWithRetry(trackId);
+
+        result.spotify = {
+          id: track.id,
+          uri: track.uri,
+          name: track.name,
+          artist: track.artists?.map((a) => a.name).join(", ") || "",
+          explicit: !!track.explicit,
+          durationMs: track.duration_ms,
+          externalUrl: track.external_urls?.spotify || spotifyTrackUrl(track.id),
+          album: track.album?.name || "",
+          image:
+            track.album?.images?.[0]?.url ||
+            track.album?.images?.[1]?.url ||
+            track.album?.images?.[2]?.url ||
+            ""
+        };
+      } catch (error) {
+        result.error = error?.message || "Spotify lookup failed";
+      }
+
+      enriched[index] = result;
+    }
   }
 
+  const workers = Array.from(
+    { length: Math.max(1, Math.min(CONFIG.trackLookupConcurrency, rows.length || 1)) },
+    () => worker()
+  );
+
+  await Promise.all(workers);
   return enriched;
 }
 
@@ -699,21 +798,23 @@ function buildRequestSummary(requests) {
 // ======================================================
 // APPROVE / REJECT
 // ======================================================
-function approveRequest(request) {
+function approveRequest(request, options = {}) {
+  const { silentStatus = false } = options;
+
   if (!request.spotify) {
-    setStatus("Cannot approve a request with no valid Spotify track.");
-    return;
+    if (!silentStatus) setStatus("Cannot approve a request with no valid Spotify track.");
+    return false;
   }
 
   if (request.spotify.explicit) {
-    setStatus("Cannot approve an explicit song.");
-    return;
+    if (!silentStatus) setStatus("Cannot approve an explicit song.");
+    return false;
   }
 
   const queue = getApprovedQueue();
   if (queue.some((item) => item.requestId === request.requestId)) {
-    setStatus("Song is already approved.");
-    return;
+    if (!silentStatus) setStatus("Song is already approved.");
+    return false;
   }
 
   queue.push({
@@ -725,23 +826,47 @@ function approveRequest(request) {
   });
 
   saveApprovedQueue(queue);
+  pushModerationHistory({
+    type: "approve",
+    requestId: request.requestId
+  });
   renderApprovedQueue();
   renderRequests(currentRequests);
   renderApprovedPreview();
 
-  setStatus(`Approved: ${request.spotify.artist} — ${request.spotify.name}`);
+  if (!silentStatus) {
+    setStatus(`Approved: ${request.spotify.artist} — ${request.spotify.name}`);
+  }
+
+  return true;
 }
 
 function rejectRequest(request) {
   const rejected = getRejectedIds();
   rejected.add(request.requestId);
   saveRejectedIds(rejected);
+  pushModerationHistory({
+    type: "reject",
+    requestId: request.requestId
+  });
   renderRequests(currentRequests);
   setStatus("Request removed from unapproved list.");
 }
 
 function removeApproved(requestId) {
-  const queue = getApprovedQueue().filter((item) => item.requestId !== requestId);
+  const existingQueue = getApprovedQueue();
+  const removedIndex = existingQueue.findIndex((item) => item.requestId === requestId);
+  const removedItem = removedIndex >= 0 ? existingQueue[removedIndex] : null;
+  const queue = existingQueue.filter((item) => item.requestId !== requestId);
+
+  if (removedItem) {
+    pushModerationHistory({
+      type: "remove-approved",
+      index: removedIndex,
+      item: removedItem
+    });
+  }
+
   saveApprovedQueue(queue);
   clampQueuePointer();
   renderApprovedQueue();
@@ -750,21 +875,83 @@ function removeApproved(requestId) {
   setStatus("Removed song from approved list.");
 }
 
+function approveAllVisibleCleanRequests() {
+  const visible = getVisibleUnapprovedRequests(currentRequests);
+  const cleanVisible = visible.filter((request) => request.spotify && request.spotify.explicit === false);
+
+  if (!cleanVisible.length) {
+    setStatus("No visible clean requests to approve.");
+    return;
+  }
+
+  let approvedCount = 0;
+  for (const request of cleanVisible) {
+    if (approveRequest(request, { silentStatus: true })) {
+      approvedCount += 1;
+    }
+  }
+
+  setStatus(`Approved ${approvedCount} clean visible request(s).`);
+}
+
+function undoLastModerationAction() {
+  const action = moderationHistory.pop();
+  if (!action) {
+    setStatus("No moderation actions to undo.");
+    return;
+  }
+
+  isUndoingModeration = true;
+
+  try {
+    if (action.type === "approve") {
+      const queue = getApprovedQueue().filter((item) => item.requestId !== action.requestId);
+      saveApprovedQueue(queue);
+      clampQueuePointer();
+      renderApprovedQueue();
+      renderRequests(currentRequests);
+      renderApprovedPreview();
+      setStatus("Undid last approve action.");
+      return;
+    }
+
+    if (action.type === "reject") {
+      const rejected = getRejectedIds();
+      rejected.delete(action.requestId);
+      saveRejectedIds(rejected);
+      renderRequests(currentRequests);
+      setStatus("Undid last reject action.");
+      return;
+    }
+
+    if (action.type === "remove-approved") {
+      const queue = getApprovedQueue();
+      if (!queue.some((item) => item.requestId === action.item?.requestId)) {
+        const insertIndex = Math.max(0, Math.min(action.index, queue.length));
+        queue.splice(insertIndex, 0, action.item);
+        saveApprovedQueue(queue);
+        setQueuePointer(insertIndex);
+      }
+      renderApprovedQueue();
+      renderRequests(currentRequests);
+      renderApprovedPreview();
+      setStatus("Undid last remove action.");
+      return;
+    }
+
+    setStatus("No undo handler for the last action.");
+  } finally {
+    isUndoingModeration = false;
+  }
+}
+
 // ======================================================
 // RENDER REQUESTS
 // ======================================================
 function renderRequests(requests) {
   if (!el.requestTableBody) return;
 
-  const hideExplicit = !!el.hideExplicitOnly?.checked;
-  const rejected = getRejectedIds();
-
-  const visibleRequests = requests.filter((request) => {
-    if (rejected.has(request.requestId)) return false;
-    if (isApproved(request.requestId)) return false;
-    if (hideExplicit && request.spotify && request.spotify.explicit === true) return false;
-    return true;
-  });
+  const visibleRequests = getVisibleUnapprovedRequests(requests);
 
   if (!visibleRequests.length) {
     el.requestTableBody.innerHTML = `
@@ -1201,6 +1388,14 @@ function wireStaticEvents() {
     moveQueuePointer(1);
   });
 
+  el.btnApproveAllCleanVisible?.addEventListener("click", () => {
+    approveAllVisibleCleanRequests();
+  });
+
+  el.btnUndoModerationAction?.addEventListener("click", () => {
+    undoLastModerationAction();
+  });
+
   el.hideExplicitOnly?.addEventListener("change", () => {
     renderRequests(currentRequests);
   });
@@ -1274,8 +1469,11 @@ async function init() {
   buildRequestSummary([]);
   await handleSpotifyCallback();
 
+  let hasActiveSpotifyLogin = false;
+
   try {
     const me = await getCurrentUserProfile();
+    hasActiveSpotifyLogin = true;
     if (me?.display_name) {
       setStatus(`Ready. Logged in as ${me.display_name}.`);
     } else {
@@ -1291,7 +1489,9 @@ async function init() {
     console.warn("Initial playback refresh failed:", error);
   }
 
-  startPlaybackPolling();
+  if (hasActiveSpotifyLogin || !!localStorage.getItem(LS.accessToken)) {
+    startPlaybackPolling();
+  }
 }
 
 window.addEventListener("DOMContentLoaded", () => {
