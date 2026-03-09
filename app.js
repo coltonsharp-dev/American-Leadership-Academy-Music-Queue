@@ -1,6 +1,6 @@
 // ======================================================
 // ALA Music Requester Dashboard
-// One-page version with default playlist start + queue add
+// One-page version with default playlist + queue viewer
 // ======================================================
 
 // --------------------
@@ -16,7 +16,8 @@ const CONFIG = {
     "user-read-private",
     "user-read-email",
     "user-read-playback-state",
-    "user-modify-playback-state"
+    "user-modify-playback-state",
+    "user-read-currently-playing"
   ],
   playbackPollMs: 15000
 };
@@ -56,7 +57,8 @@ const el = {
   requestSummary: document.getElementById("requestSummary"),
   requestTableBody: document.getElementById("requestTableBody"),
   approvedQueueList: document.getElementById("approvedQueueList"),
-  approvedPreviewTable: document.getElementById("approvedPreviewTable")
+  approvedPreviewTable: document.getElementById("approvedPreviewTable"),
+  spotifyQueueList: document.getElementById("spotifyQueueList")
 };
 
 // --------------------
@@ -110,6 +112,10 @@ function normalizeHeader(value) {
 
 function buildRequestId(row) {
   return [row.timestamp || "", row.email || "", row.spotifyLink || ""].join("|");
+}
+
+function isTrackObject(item) {
+  return !!item && item.type === "track";
 }
 
 // ======================================================
@@ -456,6 +462,10 @@ async function getAvailableDevices() {
   return spotifyFetch("/me/player/devices");
 }
 
+async function getSpotifyQueue() {
+  return spotifyFetch("/me/player/queue");
+}
+
 async function ensureActiveDevice() {
   const deviceData = await getAvailableDevices();
   const devices = deviceData?.devices || [];
@@ -478,25 +488,24 @@ async function ensureActiveDevice() {
 }
 
 async function startDefaultPlaylist() {
-  if (!CONFIG.defaultPlaylistId || CONFIG.defaultPlaylistId === "DEFAULT_PLAYLIST_ID_HERE") {
-    throw new Error("Set CONFIG.defaultPlaylistId to your real Spotify playlist ID first.");
-  }
-
   const token = await getAccessToken();
   if (!token) throw new Error("Spotify login required.");
 
   const device = await ensureActiveDevice();
 
-  const response = await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${encodeURIComponent(device.id)}`, {
-    method: "PUT",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      context_uri: `spotify:playlist:${CONFIG.defaultPlaylistId}`
-    })
-  });
+  const response = await fetch(
+    `https://api.spotify.com/v1/me/player/play?device_id=${encodeURIComponent(device.id)}`,
+    {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        context_uri: `spotify:playlist:${CONFIG.defaultPlaylistId}`
+      })
+    }
+  );
 
   if (!response.ok && response.status !== 204) {
     const text = await response.text();
@@ -718,6 +727,7 @@ function approveRequest(request) {
   saveApprovedQueue(queue);
   renderApprovedQueue();
   renderRequests(currentRequests);
+  renderApprovedPreview();
 
   setStatus(`Approved: ${request.spotify.artist} — ${request.spotify.name}`);
 }
@@ -853,7 +863,7 @@ function renderApprovedQueue() {
       const image = item.spotify?.image || "";
 
       return `
-        <div class="queue-item${activeClass}">
+        <div class="queue-item${activeClass}" data-queue-index="${index}">
           <div class="queue-item-art-wrap">
             ${
               image
@@ -920,9 +930,7 @@ function renderApprovedPreview() {
         <div class="request-meta">
           ${escapeHtml(item.album || "Unknown Album")} • ${escapeHtml(msToMinSec(item.durationMs))}
         </div>
-        <div class="request-submitted">
-          Selected approved track preview
-        </div>
+        <div class="request-submitted">Selected approved track preview</div>
       </div>
 
       <div class="request-actions">
@@ -934,6 +942,92 @@ function renderApprovedPreview() {
   `;
 }
 
+function renderSpotifyQueue(queueData) {
+  if (!el.spotifyQueueList) return;
+
+  const currentlyPlaying = queueData?.currently_playing;
+  const queue = Array.isArray(queueData?.queue) ? queueData.queue : [];
+
+  if (!currentlyPlaying && !queue.length) {
+    el.spotifyQueueList.innerHTML = `<div class="empty-state">Spotify queue is empty or unavailable.</div>`;
+    return;
+  }
+
+  const blocks = [];
+
+  if (currentlyPlaying && isTrackObject(currentlyPlaying)) {
+    blocks.push(`
+      <div class="request-item queue-item-active">
+        <div class="request-art-wrap">
+          ${
+            currentlyPlaying.album?.images?.[0]?.url
+              ? `<img class="request-art" src="${escapeHtml(currentlyPlaying.album.images[0].url)}" alt="${escapeHtml(currentlyPlaying.name)} cover art">`
+              : `<div class="request-art request-art-placeholder">No Art</div>`
+          }
+        </div>
+
+        <div class="request-main">
+          <div class="request-title-row">
+            <div class="request-song">${escapeHtml(currentlyPlaying.name)}</div>
+            <span class="badge badge-clean">Now Playing</span>
+          </div>
+
+          <div class="request-artist">${escapeHtml(
+            (currentlyPlaying.artists || []).map((a) => a.name).join(", ") || "Unknown artist"
+          )}</div>
+          <div class="request-meta">
+            ${escapeHtml(currentlyPlaying.album?.name || "Unknown Album")} • ${escapeHtml(msToMinSec(currentlyPlaying.duration_ms))}
+          </div>
+        </div>
+
+        <div class="request-actions">
+          <a class="ghost-btn" href="${escapeHtml(currentlyPlaying.external_urls?.spotify || "#")}" target="_blank" rel="noopener noreferrer">
+            Open in Spotify
+          </a>
+        </div>
+      </div>
+    `);
+  }
+
+  queue.forEach((item, index) => {
+    if (!isTrackObject(item)) return;
+
+    blocks.push(`
+      <div class="request-item">
+        <div class="request-art-wrap">
+          ${
+            item.album?.images?.[0]?.url
+              ? `<img class="request-art" src="${escapeHtml(item.album.images[0].url)}" alt="${escapeHtml(item.name)} cover art">`
+              : `<div class="request-art request-art-placeholder">No Art</div>`
+          }
+        </div>
+
+        <div class="request-main">
+          <div class="request-title-row">
+            <div class="request-song">${escapeHtml(item.name)}</div>
+            <span class="badge badge-clean">Queue #${index + 1}</span>
+          </div>
+
+          <div class="request-artist">${escapeHtml(
+            (item.artists || []).map((a) => a.name).join(", ") || "Unknown artist"
+          )}</div>
+          <div class="request-meta">
+            ${escapeHtml(item.album?.name || "Unknown Album")} • ${escapeHtml(msToMinSec(item.duration_ms))}
+          </div>
+        </div>
+
+        <div class="request-actions">
+          <a class="ghost-btn" href="${escapeHtml(item.external_urls?.spotify || "#")}" target="_blank" rel="noopener noreferrer">
+            Open in Spotify
+          </a>
+        </div>
+      </div>
+    `);
+  });
+
+  el.spotifyQueueList.innerHTML = blocks.join("");
+}
+
 // ======================================================
 // PLAYBACK PREVIEW
 // ======================================================
@@ -941,9 +1035,12 @@ async function refreshPlayback() {
   if (!el.nowPlaying || !el.nowPlayingMeta) return;
 
   try {
-    const data = await getCurrentlyPlaying();
+    const [playbackData, queueData] = await Promise.all([
+      getCurrentlyPlaying(),
+      getSpotifyQueue().catch(() => null)
+    ]);
 
-    if (!data || !data.item) {
+    if (!playbackData || !playbackData.item) {
       el.nowPlaying.textContent = "Nothing currently loaded";
       el.nowPlayingMeta.textContent = "Waiting for playback data...";
 
@@ -951,26 +1048,27 @@ async function refreshPlayback() {
         el.nowPlayingArt.src = "";
         el.nowPlayingArt.style.visibility = "hidden";
       }
-      return;
+    } else {
+      const item = playbackData.item;
+      const artists = item.artists?.map((a) => a.name).join(", ") || "Unknown Artist";
+      const image =
+        item.album?.images?.[0]?.url ||
+        item.album?.images?.[1]?.url ||
+        item.album?.images?.[2]?.url ||
+        "";
+
+      el.nowPlaying.textContent = `${artists} — ${item.name}`;
+      el.nowPlayingMeta.textContent =
+        `${item.album?.name || "Unknown Album"} | ${msToMinSec(item.duration_ms)}`;
+
+      if (el.nowPlayingArt) {
+        el.nowPlayingArt.src = image;
+        el.nowPlayingArt.alt = `${item.name} cover art`;
+        el.nowPlayingArt.style.visibility = image ? "visible" : "hidden";
+      }
     }
 
-    const item = data.item;
-    const artists = item.artists?.map((a) => a.name).join(", ") || "Unknown Artist";
-    const image =
-      item.album?.images?.[0]?.url ||
-      item.album?.images?.[1]?.url ||
-      item.album?.images?.[2]?.url ||
-      "";
-
-    el.nowPlaying.textContent = `${artists} — ${item.name}`;
-    el.nowPlayingMeta.textContent =
-      `${item.album?.name || "Unknown Album"} | ${msToMinSec(item.duration_ms)}`;
-
-    if (el.nowPlayingArt) {
-      el.nowPlayingArt.src = image;
-      el.nowPlayingArt.alt = `${item.name} cover art`;
-      el.nowPlayingArt.style.visibility = image ? "visible" : "hidden";
-    }
+    renderSpotifyQueue(queueData);
   } catch (error) {
     el.nowPlaying.textContent = "Nothing currently loaded";
     el.nowPlayingMeta.textContent = error?.message || "Playback unavailable";
@@ -979,6 +1077,8 @@ async function refreshPlayback() {
       el.nowPlayingArt.src = "";
       el.nowPlayingArt.style.visibility = "hidden";
     }
+
+    renderSpotifyQueue(null);
   }
 }
 
@@ -1012,6 +1112,7 @@ async function addSelectedApprovedToQueue() {
   }
 
   await addTrackToSpotifyQueue(item.spotify.uri);
+  await refreshPlayback();
 }
 
 // ======================================================
@@ -1080,10 +1181,12 @@ function wireStaticEvents() {
 
   el.btnAddApprovedToQueue?.addEventListener("click", async () => {
     try {
-      await addSelectedApprovedToQueue();
       const queue = getApprovedQueue();
       const item = queue[clampQueuePointer()];
-      setStatus(`Added to queue: ${item?.spotify?.artist || "Unknown Artist"} — ${item?.spotify?.name || "Unknown Song"}`);
+      await addSelectedApprovedToQueue();
+      setStatus(
+        `Added to queue: ${item?.spotify?.artist || "Unknown Artist"} — ${item?.spotify?.name || "Unknown Song"}`
+      );
     } catch (error) {
       console.error(error);
       setStatus(error?.message || "Could not add approved song to queue.");
@@ -1122,9 +1225,19 @@ function wireStaticEvents() {
 
   el.approvedQueueList?.addEventListener("click", async (event) => {
     const removeButton = event.target.closest(".remove-approved-btn");
+    const queueItem = event.target.closest(".queue-item[data-queue-index]");
 
     if (removeButton) {
       removeApproved(removeButton.dataset.requestId);
+      return;
+    }
+
+    if (queueItem) {
+      const index = Number(queueItem.dataset.queueIndex);
+      if (Number.isFinite(index)) {
+        setQueuePointer(index);
+        renderApprovedQueue();
+      }
     }
   });
 }
