@@ -1,6 +1,6 @@
 // ======================================================
 // ALA Music Requester Dashboard
-// Final cleaned moderation-only app.js
+// One-page version with default playlist start + queue add
 // ======================================================
 
 // --------------------
@@ -9,12 +9,14 @@
 const CONFIG = {
   clientId: "cbfd828db1414a2183039d01ceeaf181",
   redirectUri: "https://coltonsharp-dev.github.io/American-Leadership-Academy-Music-Queue/",
+  defaultPlaylistId: "3dcGJ6miJHVxZkQEIwGog5",
   requestsCsvUrl:
     "https://docs.google.com/spreadsheets/d/e/2PACX-1vQyc3RRDmjc-nN-XgMMDocbnn1tlxue5ynNoNnYSxnRKxgp2LRGNmYZXnVgAFLH7IViwTAtmIAkvDsK/pub?output=csv",
   scopes: [
     "user-read-private",
     "user-read-email",
-    "user-read-playback-state"
+    "user-read-playback-state",
+    "user-modify-playback-state"
   ],
   playbackPollMs: 15000
 };
@@ -42,19 +44,19 @@ const el = {
   btnRefreshPlayback: document.getElementById("btnRefreshPlayback"),
   btnPrevQueue: document.getElementById("btnPrevQueue"),
   btnNextQueue: document.getElementById("btnNextQueue"),
+  btnStartDefaultPlaylist: document.getElementById("btnStartDefaultPlaylist"),
+  btnAddApprovedToQueue: document.getElementById("btnAddApprovedToQueue"),
 
   status: document.getElementById("status"),
   nowPlaying: document.getElementById("nowPlaying"),
   nowPlayingMeta: document.getElementById("nowPlayingMeta"),
   nowPlayingArt: document.getElementById("nowPlayingArt"),
 
-  upNext: document.getElementById("upNext"),
-  upNextArt: document.getElementById("upNextArt"),
-
   hideExplicitOnly: document.getElementById("hideExplicitOnly"),
   requestSummary: document.getElementById("requestSummary"),
   requestTableBody: document.getElementById("requestTableBody"),
-  approvedQueueList: document.getElementById("approvedQueueList")
+  approvedQueueList: document.getElementById("approvedQueueList"),
+  approvedPreviewTable: document.getElementById("approvedPreviewTable")
 };
 
 // --------------------
@@ -289,7 +291,8 @@ async function loginToSpotify() {
     redirect_uri: CONFIG.redirectUri,
     code_challenge_method: "S256",
     code_challenge: challenge,
-    scope: CONFIG.scopes.join(" ")
+    scope: CONFIG.scopes.join(" "),
+    show_dialog: "true"
   });
 
   window.location.href = `https://accounts.spotify.com/authorize?${params.toString()}`;
@@ -449,6 +452,93 @@ async function getCurrentlyPlaying() {
   }
 }
 
+async function getAvailableDevices() {
+  return spotifyFetch("/me/player/devices");
+}
+
+async function ensureActiveDevice() {
+  const deviceData = await getAvailableDevices();
+  const devices = deviceData?.devices || [];
+
+  if (!devices.length) {
+    throw new Error(
+      "No active Spotify device found. Open Spotify in another window or app and start playback there first."
+    );
+  }
+
+  const activeDevice = devices.find((d) => d.is_active);
+  if (activeDevice) return activeDevice;
+
+  const controllable = devices.find((d) => !d.is_restricted) || devices[0];
+  if (!controllable?.id) {
+    throw new Error("A Spotify device was found, but it cannot be controlled.");
+  }
+
+  return controllable;
+}
+
+async function startDefaultPlaylist() {
+  if (!CONFIG.defaultPlaylistId || CONFIG.defaultPlaylistId === "DEFAULT_PLAYLIST_ID_HERE") {
+    throw new Error("Set CONFIG.defaultPlaylistId to your real Spotify playlist ID first.");
+  }
+
+  const token = await getAccessToken();
+  if (!token) throw new Error("Spotify login required.");
+
+  const device = await ensureActiveDevice();
+
+  const response = await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${encodeURIComponent(device.id)}`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      context_uri: `spotify:playlist:${CONFIG.defaultPlaylistId}`
+    })
+  });
+
+  if (!response.ok && response.status !== 204) {
+    const text = await response.text();
+    throw new Error(`${response.status} ${text}`);
+  }
+}
+
+async function addTrackToSpotifyQueue(trackUri) {
+  const token = await getAccessToken();
+  if (!token) throw new Error("Spotify login required.");
+
+  await ensureActiveDevice();
+
+  const url = new URL("https://api.spotify.com/v1/me/player/queue");
+  url.searchParams.set("uri", trackUri);
+
+  const response = await fetch(url.toString(), {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+
+  if (!response.ok && response.status !== 204) {
+    const text = await response.text();
+
+    if (response.status === 404 && text.includes("NO_ACTIVE_DEVICE")) {
+      throw new Error(
+        "No active Spotify device found. Open Spotify and start playback first."
+      );
+    }
+
+    if (response.status === 403) {
+      throw new Error(
+        "Spotify blocked Add to Queue. This usually means the account is not Premium or the device cannot be controlled."
+      );
+    }
+
+    throw new Error(`${response.status} ${text}`);
+  }
+}
+
 // ======================================================
 // GOOGLE SHEET REQUEST LOADING
 // ======================================================
@@ -490,12 +580,7 @@ async function fetchStudentRequestRows() {
   const headers = rows[0].map((cell) => String(cell ?? "").trim());
 
   const timestampIndex = findHeaderIndex(headers, ["Timestamp"], 0);
-  const emailIndex = findHeaderIndex(
-    headers,
-    ["Email Address", "Email", "Student Email"],
-    1
-  );
-
+  const emailIndex = findHeaderIndex(headers, ["Email Address", "Email", "Student Email"], 1);
   const spotifyLinkIndex = findHeaderIndex(
     headers,
     [
@@ -515,7 +600,7 @@ async function fetchStudentRequestRows() {
     );
   }
 
-  const dataRows = rows
+  return rows
     .slice(1)
     .filter(
       (row) =>
@@ -525,13 +610,9 @@ async function fetchStudentRequestRows() {
     .map((row) => ({
       timestamp: String(row[timestampIndex] ?? "").trim(),
       email: String(row[emailIndex] ?? "").trim(),
-      spotifyLink: String(row[spotifyLinkIndex] ?? "").trim(),
-      artistInput: "",
-      songInput: ""
+      spotifyLink: String(row[spotifyLinkIndex] ?? "").trim()
     }))
     .filter((row) => row.spotifyLink);
-
-  return dataRows;
 }
 
 async function enrichRequestRows(rows) {
@@ -573,8 +654,7 @@ async function enrichRequestRows(rows) {
           track.album?.images?.[0]?.url ||
           track.album?.images?.[1]?.url ||
           track.album?.images?.[2]?.url ||
-          "",
-        previewUrl: track.preview_url || ""
+          ""
       };
     } catch (error) {
       result.error = error?.message || "Spotify lookup failed";
@@ -656,12 +736,12 @@ function removeApproved(requestId) {
   clampQueuePointer();
   renderApprovedQueue();
   renderRequests(currentRequests);
-  updateUpNext();
+  renderApprovedPreview();
   setStatus("Removed song from approved list.");
 }
 
 // ======================================================
-// RENDER UNAPPROVED REQUESTS
+// RENDER REQUESTS
 // ======================================================
 function renderRequests(requests) {
   if (!el.requestTableBody) return;
@@ -751,9 +831,6 @@ function renderRequests(requests) {
     .join("");
 }
 
-// ======================================================
-// RENDER APPROVED QUEUE
-// ======================================================
 function renderApprovedQueue() {
   if (!el.approvedQueueList) return;
 
@@ -762,7 +839,7 @@ function renderApprovedQueue() {
 
   if (!queue.length) {
     el.approvedQueueList.innerHTML = `<div class="empty-state">No approved songs yet.</div>`;
-    updateUpNext();
+    renderApprovedPreview();
     return;
   }
 
@@ -800,21 +877,16 @@ function renderApprovedQueue() {
     })
     .join("");
 
-  updateUpNext();
+  renderApprovedPreview();
 }
 
-function updateUpNext() {
-  if (!el.upNext) return;
+function renderApprovedPreview() {
+  if (!el.approvedPreviewTable) return;
 
   const queue = getApprovedQueue();
 
   if (!queue.length) {
-    el.upNext.textContent = "No approved songs yet";
-
-    if (el.upNextArt) {
-      el.upNextArt.src = "";
-      el.upNextArt.style.visibility = "hidden";
-    }
+    el.approvedPreviewTable.innerHTML = `<div class="empty-state">No approved songs yet.</div>`;
     return;
   }
 
@@ -822,22 +894,44 @@ function updateUpNext() {
   const current = queue[pointer];
 
   if (!current?.spotify) {
-    el.upNext.textContent = "No approved songs yet";
-
-    if (el.upNextArt) {
-      el.upNextArt.src = "";
-      el.upNextArt.style.visibility = "hidden";
-    }
+    el.approvedPreviewTable.innerHTML = `<div class="empty-state">No approved songs yet.</div>`;
     return;
   }
 
-  el.upNext.textContent = `${current.spotify.artist} — ${current.spotify.name}`;
+  const item = current.spotify;
 
-  if (el.upNextArt) {
-    el.upNextArt.src = current.spotify.image || "";
-    el.upNextArt.alt = `${current.spotify.name} cover art`;
-    el.upNextArt.style.visibility = current.spotify.image ? "visible" : "hidden";
-  }
+  el.approvedPreviewTable.innerHTML = `
+    <div class="request-item queue-item-active">
+      <div class="request-art-wrap">
+        ${
+          item.image
+            ? `<img class="request-art" src="${escapeHtml(item.image)}" alt="${escapeHtml(item.name)} cover art">`
+            : `<div class="request-art request-art-placeholder">No Art</div>`
+        }
+      </div>
+
+      <div class="request-main">
+        <div class="request-title-row">
+          <div class="request-song">${escapeHtml(item.name)}</div>
+          <span class="badge badge-clean">Approved</span>
+        </div>
+
+        <div class="request-artist">${escapeHtml(item.artist || "Unknown artist")}</div>
+        <div class="request-meta">
+          ${escapeHtml(item.album || "Unknown Album")} • ${escapeHtml(msToMinSec(item.durationMs))}
+        </div>
+        <div class="request-submitted">
+          Selected approved track preview
+        </div>
+      </div>
+
+      <div class="request-actions">
+        <a class="ghost-btn" href="${escapeHtml(item.externalUrl || "#")}" target="_blank" rel="noopener noreferrer">
+          Open in Spotify
+        </a>
+      </div>
+    </div>
+  `;
 }
 
 // ======================================================
@@ -904,6 +998,22 @@ function moveQueuePointer(delta) {
   renderApprovedQueue();
 }
 
+async function addSelectedApprovedToQueue() {
+  const queue = getApprovedQueue();
+  if (!queue.length) {
+    throw new Error("No approved songs available.");
+  }
+
+  const pointer = clampQueuePointer();
+  const item = queue[pointer];
+
+  if (!item?.spotify?.uri) {
+    throw new Error("Selected approved song is missing Spotify data.");
+  }
+
+  await addTrackToSpotifyQueue(item.spotify.uri);
+}
+
 // ======================================================
 // LOAD REQUESTS
 // ======================================================
@@ -954,6 +1064,29 @@ function wireStaticEvents() {
       setStatus("Playback refreshed.");
     } catch (error) {
       setStatus(error?.message || "Failed to refresh playback.");
+    }
+  });
+
+  el.btnStartDefaultPlaylist?.addEventListener("click", async () => {
+    try {
+      await startDefaultPlaylist();
+      setStatus("Default playlist started.");
+      await refreshPlayback();
+    } catch (error) {
+      console.error(error);
+      setStatus(error?.message || "Could not start default playlist.");
+    }
+  });
+
+  el.btnAddApprovedToQueue?.addEventListener("click", async () => {
+    try {
+      await addSelectedApprovedToQueue();
+      const queue = getApprovedQueue();
+      const item = queue[clampQueuePointer()];
+      setStatus(`Added to queue: ${item?.spotify?.artist || "Unknown Artist"} — ${item?.spotify?.name || "Unknown Song"}`);
+    } catch (error) {
+      console.error(error);
+      setStatus(error?.message || "Could not add approved song to queue.");
     }
   });
 
