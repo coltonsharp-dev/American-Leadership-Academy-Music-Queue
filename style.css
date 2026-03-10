@@ -322,6 +322,39 @@ button:disabled {
   gap: 14px;
 }
 
+.search-controls {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+}
+
+.search-input {
+  appearance: none;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 11px 14px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  transition:
+    border-color var(--transition),
+    box-shadow var(--transition),
+    background var(--transition);
+}
+
+.search-input::placeholder {
+  color: var(--muted);
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: rgba(29, 185, 84, 0.35);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 0 0 4px rgba(29, 185, 84, 0.12);
+}
+
 .queue-item,
 .request-item {
   display: grid;
@@ -430,6 +463,11 @@ button:disabled {
 .badge-error {
   background: var(--warn-soft);
   color: #ffd580;
+}
+
+.badge-override {
+  background: var(--blue-soft);
+  color: #bfdbfe;
 }
 
 .btn-lyrics {
@@ -566,6 +604,16 @@ body.mod-panel-open {
   min-height: 0;
 }
 
+.mod-top-search-card {
+  flex-shrink: 0;
+}
+
+.search-card #manualSearchResults {
+  max-height: 280px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
 .mod-grid {
   flex: 1;
   display: grid;
@@ -647,6 +695,10 @@ body.mod-panel-open {
   .queue-item-actions,
   .request-actions {
     justify-content: flex-start;
+  }
+
+  .search-controls {
+    grid-template-columns: 1fr;
   }
 
   .media-card {

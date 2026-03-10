@@ -126,6 +126,33 @@
     </div>
 
     <div class="mod-overlay-body">
+      <section class="card search-card mod-top-search-card">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Moderator Override</p>
+            <h2>Search Spotify and Add Exact Track</h2>
+          </div>
+        </div>
+        <div class="summary-text">
+          Search Spotify, review the exact result, and add it straight to the moderator queue. Moderator adds can override the normal clean-only approval path.
+        </div>
+        <div class="search-controls">
+          <input
+            id="manualSearchInput"
+            class="search-input"
+            type="search"
+            placeholder="Search by song title, artist, or both"
+            aria-label="Search Spotify tracks"
+          />
+          <button id="btnSearchSongs" class="btn btn-small btn-primary" type="button">
+            Search
+          </button>
+        </div>
+        <div id="manualSearchResults" class="requests-list">
+          <div class="empty-state">Search Spotify to verify and add the exact track you want.</div>
+        </div>
+      </section>
+
       <div class="mod-grid">
 
         <section class="card requests-card">
@@ -171,6 +198,11 @@
               <div>
                 <p class="section-kicker">Moderator Queue</p>
                 <h2>Approved Songs</h2>
+              </div>
+              <div class="queue-nav">
+                <button id="btnRemoveAllApproved" class="btn btn-small" type="button">
+                  Remove All
+                </button>
               </div>
             </div>
             <div id="approvedQueueList" class="queue-list">

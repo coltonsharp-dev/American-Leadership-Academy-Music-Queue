@@ -22,7 +22,8 @@ const CONFIG = {
   playbackPollMs: 15000,
   trackLookupConcurrency: 5,
   trackLookupRetryCount: 2,
-  trackLookupRetryDelayMs: 500
+  trackLookupRetryDelayMs: 500,
+  manualSearchLimit: 8
 };
 
 // --------------------
@@ -52,8 +53,10 @@ const el = {
   btnStartDefaultPlaylist: document.getElementById("btnStartDefaultPlaylist"),
   btnAddApprovedToQueue: document.getElementById("btnAddApprovedToQueue"),
   btnApproveAllCleanVisible: document.getElementById("btnApproveAllCleanVisible"),
+  btnRemoveAllApproved: document.getElementById("btnRemoveAllApproved"),
   btnUndoModerationAction: document.getElementById("btnUndoModerationAction"),
   btnOpenModeration: document.getElementById("btnOpenModeration"),
+  btnSearchSongs: document.getElementById("btnSearchSongs"),
 
   status: document.getElementById("status"),
   nowPlaying: document.getElementById("nowPlaying"),
@@ -65,7 +68,9 @@ const el = {
   requestTableBody: document.getElementById("requestTableBody"),
   approvedQueueList: document.getElementById("approvedQueueList"),
   approvedPreviewTable: document.getElementById("approvedPreviewTable"),
-  spotifyQueueList: document.getElementById("spotifyQueueList")
+  spotifyQueueList: document.getElementById("spotifyQueueList"),
+  manualSearchInput: document.getElementById("manualSearchInput"),
+  manualSearchResults: document.getElementById("manualSearchResults")
 };
 
 // --------------------
@@ -75,6 +80,7 @@ let currentRequests = [];
 let playbackTimer = null;
 const moderationHistory = [];
 let isUndoingModeration = false;
+let manualSearchResults = [];
 
 // ======================================================
 // BASIC HELPERS
@@ -136,6 +142,33 @@ function buildRequestId(row) {
 
 function isTrackObject(item) {
   return !!item && item.type === "track";
+}
+
+function normalizeSpotifyTrack(track) {
+  if (!track) return null;
+
+  const artistNames = Array.isArray(track.artists)
+    ? track.artists.map((artist) => artist?.name).filter(Boolean).join(", ")
+    : String(track.artist || "").trim();
+
+  return {
+    id: track.id,
+    uri: track.uri,
+    name: track.name,
+    artist: artistNames || "Unknown Artist",
+    explicit: !!track.explicit,
+    durationMs: track.duration_ms ?? track.durationMs ?? 0,
+    externalUrl:
+      track.external_urls?.spotify ||
+      track.externalUrl ||
+      (track.id ? spotifyTrackUrl(track.id) : ""),
+    album: track.album?.name || track.album || "",
+    image:
+      track.album?.images?.[0]?.url ||
+      track.album?.images?.[1]?.url ||
+      track.album?.images?.[2]?.url ||
+      track.image || ""
+  };
 }
 
 function getRedirectUri() {
@@ -239,6 +272,29 @@ function clampQueuePointer() {
   const clamped = Math.min(current, queue.length - 1);
   setQueuePointer(clamped);
   return clamped;
+}
+
+function isTrackApproved(trackId) {
+  if (!trackId) return false;
+  return getApprovedQueue().some((item) => item.spotify?.id === trackId);
+}
+
+function countTrackInApprovedQueue(trackId) {
+  if (!trackId) return 0;
+  return getApprovedQueue().filter((item) => item.spotify?.id === trackId).length;
+}
+
+function createManualApprovedRequest(track) {
+  const spotify = normalizeSpotifyTrack(track);
+
+  return {
+    requestId: `manual|${spotify?.id || randomString(8)}|${Date.now()}|${randomString(6)}`,
+    timestamp: "Added manually",
+    email: "",
+    spotifyLink: spotify?.externalUrl || "",
+    source: "moderator",
+    spotify
+  };
 }
 
 // ======================================================
@@ -562,6 +618,17 @@ async function getSpotifyQueue() {
   return spotifyFetch("/me/player/queue");
 }
 
+async function searchSpotifyTracks(query) {
+  const params = new URLSearchParams({
+    q: query,
+    type: "track",
+    limit: String(CONFIG.manualSearchLimit)
+  });
+
+  const response = await spotifyFetch(`/search?${params.toString()}`);
+  return Array.isArray(response?.tracks?.items) ? response.tracks.items : [];
+}
+
 async function ensureActiveDevice() {
   const deviceData = await getAvailableDevices();
   const devices = deviceData?.devices || [];
@@ -754,21 +821,7 @@ async function enrichRequestRows(rows) {
       try {
         const track = await getTrackByIdWithRetry(trackId);
 
-        result.spotify = {
-          id: track.id,
-          uri: track.uri,
-          name: track.name,
-          artist: track.artists?.map((a) => a.name).join(", ") || "",
-          explicit: !!track.explicit,
-          durationMs: track.duration_ms,
-          externalUrl: track.external_urls?.spotify || spotifyTrackUrl(track.id),
-          album: track.album?.name || "",
-          image:
-            track.album?.images?.[0]?.url ||
-            track.album?.images?.[1]?.url ||
-            track.album?.images?.[2]?.url ||
-            ""
-        };
+        result.spotify = normalizeSpotifyTrack(track);
       } catch (error) {
         result.error = error?.message || "Spotify lookup failed";
       }
@@ -811,20 +864,31 @@ function buildRequestSummary(requests) {
 // APPROVE / REJECT
 // ======================================================
 function approveRequest(request, options = {}) {
-  const { silentStatus = false } = options;
+  const {
+    silentStatus = false,
+    allowExplicit = false,
+    allowDuplicateTrack = false,
+    selectAdded = false
+  } = options;
 
   if (!request.spotify) {
     if (!silentStatus) setStatus("Cannot approve a request with no valid Spotify track.");
     return false;
   }
 
-  if (request.spotify.explicit) {
+  if (request.spotify.explicit && !allowExplicit) {
     if (!silentStatus) setStatus("Cannot approve an explicit song.");
     return false;
   }
 
   const queue = getApprovedQueue();
-  if (queue.some((item) => item.requestId === request.requestId)) {
+  if (
+    queue.some(
+      (item) =>
+        item.requestId === request.requestId ||
+        (!allowDuplicateTrack && item.spotify?.id && item.spotify.id === request.spotify.id)
+    )
+  ) {
     if (!silentStatus) setStatus("Song is already approved.");
     return false;
   }
@@ -834,10 +898,14 @@ function approveRequest(request, options = {}) {
     timestamp: request.timestamp,
     email: request.email,
     spotifyLink: request.spotifyLink,
+    source: request.source || "request",
     spotify: request.spotify
   });
 
   saveApprovedQueue(queue);
+  if (selectAdded) {
+    setQueuePointer(queue.length - 1);
+  }
   pushModerationHistory({
     type: "approve",
     requestId: request.requestId
@@ -866,12 +934,17 @@ function rejectRequest(request) {
 }
 
 function removeApproved(requestId) {
+  return removeApprovedItem(requestId);
+}
+
+function removeApprovedItem(requestId, options = {}) {
+  const { silentStatus = false, skipHistory = false } = options;
   const existingQueue = getApprovedQueue();
   const removedIndex = existingQueue.findIndex((item) => item.requestId === requestId);
   const removedItem = removedIndex >= 0 ? existingQueue[removedIndex] : null;
   const queue = existingQueue.filter((item) => item.requestId !== requestId);
 
-  if (removedItem) {
+  if (removedItem && !skipHistory) {
     pushModerationHistory({
       type: "remove-approved",
       index: removedIndex,
@@ -884,7 +957,35 @@ function removeApproved(requestId) {
   renderApprovedQueue();
   renderRequests(currentRequests);
   renderApprovedPreview();
-  setStatus("Removed song from approved list.");
+
+  if (!silentStatus) {
+    setStatus("Removed song from approved list.");
+  }
+
+  return removedItem;
+}
+
+function clearApprovedQueue() {
+  const queue = getApprovedQueue();
+
+  if (!queue.length) {
+    setStatus("Moderator queue is already empty.");
+    return;
+  }
+
+  pushModerationHistory({
+    type: "clear-approved",
+    queue,
+    pointer: getQueuePointer()
+  });
+
+  saveApprovedQueue([]);
+  setQueuePointer(0);
+  renderApprovedQueue();
+  renderRequests(currentRequests);
+  renderApprovedPreview();
+  renderManualSearchResults();
+  setStatus("Removed all songs from the moderator queue.");
 }
 
 function approveAllVisibleCleanRequests() {
@@ -951,10 +1052,79 @@ function undoLastModerationAction() {
       return;
     }
 
+    if (action.type === "clear-approved") {
+      saveApprovedQueue(Array.isArray(action.queue) ? action.queue : []);
+      setQueuePointer(action.pointer || 0);
+      renderApprovedQueue();
+      renderRequests(currentRequests);
+      renderApprovedPreview();
+      renderManualSearchResults();
+      setStatus("Undid remove all action.");
+      return;
+    }
+
     setStatus("No undo handler for the last action.");
   } finally {
     isUndoingModeration = false;
   }
+}
+
+function renderManualSearchResults() {
+  if (!el.manualSearchResults) return;
+
+  if (!manualSearchResults.length) {
+    el.manualSearchResults.innerHTML = `
+      <div class="empty-state">
+        Search Spotify to verify and add the exact track you want.
+      </div>
+    `;
+    return;
+  }
+
+  el.manualSearchResults.innerHTML = manualSearchResults
+    .map((track) => {
+      const spotify = normalizeSpotifyTrack(track);
+      const isExplicit = spotify?.explicit === true;
+      const existingCount = countTrackInApprovedQueue(spotify?.id);
+      const buttonLabel = existingCount ? `Add Again (${existingCount} queued)` : "Add to Mod Queue";
+
+      return `
+        <div class="request-item">
+          <div class="request-art-wrap">
+            ${
+              spotify?.image
+                ? `<img class="request-art" src="${escapeHtml(spotify.image)}" alt="${escapeHtml(spotify.name)} cover art">`
+                : `<div class="request-art request-art-placeholder">No Art</div>`
+            }
+          </div>
+
+          <div class="request-main">
+            <div class="request-title-row">
+              <div class="request-song">${escapeHtml(spotify?.name || "Unknown track")}</div>
+              <span class="badge ${isExplicit ? "badge-explicit" : "badge-clean"}">
+                ${isExplicit ? "Explicit" : "Clean"}
+              </span>
+            </div>
+
+            <div class="request-artist">${escapeHtml(spotify?.artist || "Unknown artist")}</div>
+            <div class="request-meta">
+              ${escapeHtml(spotify?.album || "Unknown Album")} • ${escapeHtml(msToMinSec(spotify?.durationMs || 0))}
+            </div>
+            <div class="request-submitted">Spotify track ID: ${escapeHtml(spotify?.id || "Unavailable")}</div>
+          </div>
+
+          <div class="request-actions">
+            <a class="ghost-btn" href="${escapeHtml(spotify?.externalUrl || "#")}" target="_blank" rel="noopener noreferrer">
+              Open in Spotify
+            </a>
+            <button class="add-search-result-btn" data-track-id="${escapeHtml(spotify?.id || "")}">
+              ${buttonLabel}
+            </button>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
 }
 
 // ======================================================
@@ -1061,6 +1231,9 @@ function renderApprovedQueue() {
       const artist = item.spotify?.artist || "Unknown Artist";
       const name = item.spotify?.name || "Unknown Song";
       const image = item.spotify?.image || "";
+      const sourceBadge = item.source === "moderator"
+        ? '<span class="badge badge-override">Moderator</span>'
+        : "";
 
       return `
         <div class="queue-item${activeClass}" data-queue-index="${index}">
@@ -1073,7 +1246,10 @@ function renderApprovedQueue() {
           </div>
 
           <div class="queue-item-main">
-            <div class="queue-item-title">${escapeHtml(name)}</div>
+            <div class="request-title-row">
+              <div class="queue-item-title">${escapeHtml(name)}</div>
+              ${sourceBadge}
+            </div>
             <div class="queue-item-artist">${escapeHtml(artist)}</div>
           </div>
 
@@ -1110,6 +1286,8 @@ function renderApprovedPreview() {
   }
 
   const item = current.spotify;
+  const statusBadge = current.source === "moderator" ? "Moderator Override" : "Approved";
+  const statusClass = current.source === "moderator" ? "badge-override" : "badge-clean";
 
   el.approvedPreviewTable.innerHTML = `
     <div class="request-item queue-item-active">
@@ -1124,7 +1302,7 @@ function renderApprovedPreview() {
       <div class="request-main">
         <div class="request-title-row">
           <div class="request-song">${escapeHtml(item.name)}</div>
-          <span class="badge badge-clean">Approved</span>
+          <span class="badge ${statusClass}">${statusBadge}</span>
         </div>
 
         <div class="request-artist">${escapeHtml(item.artist || "Unknown artist")}</div>
@@ -1316,7 +1494,75 @@ async function addSelectedApprovedToQueue() {
   }
 
   await addTrackToSpotifyQueue(item.spotify.uri);
-  await refreshPlayback();
+  removeApprovedItem(item.requestId, { silentStatus: true });
+
+  try {
+    await refreshPlayback();
+  } catch (error) {
+    console.warn("Playback refresh after add-to-queue failed:", error);
+  }
+
+  return item;
+}
+
+async function runManualTrackSearch() {
+  const query = String(el.manualSearchInput?.value || "").trim();
+
+  if (!query) {
+    manualSearchResults = [];
+    renderManualSearchResults();
+    setStatus("Enter a song or artist to search Spotify.");
+    return;
+  }
+
+  setStatus(`Searching Spotify for \"${query}\"...`);
+
+  const tracks = await searchSpotifyTracks(query);
+  manualSearchResults = tracks;
+  renderManualSearchResults();
+
+  if (!tracks.length) {
+    setStatus("No Spotify tracks matched that search.");
+    return;
+  }
+
+  setStatus(`Found ${tracks.length} Spotify track(s). Review the exact result before adding.`);
+}
+
+async function addManualSearchResultToQueue(trackId) {
+  const track = manualSearchResults.find((item) => item.id === trackId);
+
+  if (!track) {
+    setStatus("Selected search result is no longer available.");
+    return;
+  }
+
+  setStatus("Verifying selected Spotify track before adding...");
+
+  let verifiedTrack;
+  try {
+    verifiedTrack = await getTrackByIdWithRetry(trackId);
+  } catch (error) {
+    setStatus(error?.message || "Could not verify the selected Spotify track.");
+    return;
+  }
+
+  const request = createManualApprovedRequest(verifiedTrack);
+  const wasApproved = approveRequest(request, {
+    silentStatus: true,
+    allowExplicit: true,
+    allowDuplicateTrack: true,
+    selectAdded: true
+  });
+
+  if (!wasApproved) {
+    setStatus("That Spotify track could not be added to the moderator queue.");
+    renderManualSearchResults();
+    return;
+  }
+
+  renderManualSearchResults();
+  setStatus(`Moderator override added: ${request.spotify.artist} — ${request.spotify.name}`);
 }
 
 // ======================================================
@@ -1400,9 +1646,7 @@ function wireStaticEvents() {
 
   el.btnAddApprovedToQueue?.addEventListener("click", async () => {
     try {
-      const queue = getApprovedQueue();
-      const item = queue[clampQueuePointer()];
-      await addSelectedApprovedToQueue();
+      const item = await addSelectedApprovedToQueue();
       setStatus(
         `Added to queue: ${item?.spotify?.artist || "Unknown Artist"} — ${item?.spotify?.name || "Unknown Song"}`
       );
@@ -1424,8 +1668,34 @@ function wireStaticEvents() {
     approveAllVisibleCleanRequests();
   });
 
+  el.btnRemoveAllApproved?.addEventListener("click", () => {
+    clearApprovedQueue();
+  });
+
   el.btnUndoModerationAction?.addEventListener("click", () => {
     undoLastModerationAction();
+  });
+
+  el.btnSearchSongs?.addEventListener("click", async () => {
+    try {
+      await runManualTrackSearch();
+    } catch (error) {
+      console.error(error);
+      setStatus(error?.message || "Spotify search failed.");
+    }
+  });
+
+  el.manualSearchInput?.addEventListener("keydown", async (event) => {
+    if (event.key !== "Enter") return;
+
+    event.preventDefault();
+
+    try {
+      await runManualTrackSearch();
+    } catch (error) {
+      console.error(error);
+      setStatus(error?.message || "Spotify search failed.");
+    }
   });
 
   el.hideExplicitOnly?.addEventListener("change", () => {
@@ -1465,6 +1735,18 @@ function wireStaticEvents() {
         setQueuePointer(index);
         renderApprovedQueue();
       }
+    }
+  });
+
+  el.manualSearchResults?.addEventListener("click", async (event) => {
+    const addButton = event.target.closest(".add-search-result-btn");
+    if (!addButton) return;
+
+    try {
+      await addManualSearchResultToQueue(addButton.dataset.trackId || "");
+    } catch (error) {
+      console.error(error);
+      setStatus(error?.message || "Moderator add failed.");
     }
   });
 
@@ -1508,6 +1790,7 @@ async function init() {
   ensureStorageDefaults();
   wireStaticEvents();
   renderApprovedQueue();
+  renderManualSearchResults();
   buildRequestSummary([]);
   await handleSpotifyCallback();
 
