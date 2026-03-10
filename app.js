@@ -53,6 +53,7 @@ const el = {
   btnAddApprovedToQueue: document.getElementById("btnAddApprovedToQueue"),
   btnApproveAllCleanVisible: document.getElementById("btnApproveAllCleanVisible"),
   btnUndoModerationAction: document.getElementById("btnUndoModerationAction"),
+  btnOpenModeration: document.getElementById("btnOpenModeration"),
 
   status: document.getElementById("status"),
   nowPlaying: document.getElementById("nowPlaying"),
@@ -109,6 +110,17 @@ function msToMinSec(ms) {
 
 function spotifyTrackUrl(trackId) {
   return `https://open.spotify.com/track/${trackId}`;
+}
+
+function buildGeniusUrl(artist, song) {
+  const slugify = (str) =>
+    String(str || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, "")
+      .trim()
+      .replace(/\s+/g, "-");
+  const primaryArtist = String(artist || "").split(/,|&/)[0].trim();
+  return `https://genius.com/${slugify(primaryArtist)}-${slugify(song)}-lyrics`;
 }
 
 function normalizeHeader(value) {
@@ -1010,7 +1022,8 @@ function renderRequests(requests) {
           <div class="request-actions">
             ${
               request.spotify
-                ? `<a class="ghost-btn" href="${escapeHtml(request.spotify.externalUrl)}" target="_blank" rel="noopener noreferrer">Open in Spotify</a>`
+                ? `<a class="ghost-btn" href="${escapeHtml(request.spotify.externalUrl)}" target="_blank" rel="noopener noreferrer">Open in Spotify</a>
+                <a class="ghost-btn btn-lyrics" href="${escapeHtml(buildGeniusUrl(request.spotify.artist, request.spotify.name))}" target="_blank" rel="noopener noreferrer">Lyrics</a>`
                 : `<span class="error-text">${escapeHtml(request.error || "No match")}</span>`
             }
 
@@ -1065,6 +1078,7 @@ function renderApprovedQueue() {
           </div>
 
           <div class="queue-item-actions">
+            <a class="ghost-btn btn-lyrics" href="${escapeHtml(buildGeniusUrl(artist, name))}" target="_blank" rel="noopener noreferrer">Lyrics</a>
             <button class="remove-approved-btn" data-request-id="${escapeHtml(item.requestId)}">
               Remove
             </button>
@@ -1124,6 +1138,7 @@ function renderApprovedPreview() {
         <a class="ghost-btn" href="${escapeHtml(item.externalUrl || "#")}" target="_blank" rel="noopener noreferrer">
           Open in Spotify
         </a>
+        <a class="ghost-btn btn-lyrics" href="${escapeHtml(buildGeniusUrl(item.artist, item.name))}" target="_blank" rel="noopener noreferrer">Lyrics</a>
       </div>
     </div>
   `;
@@ -1171,6 +1186,7 @@ function renderSpotifyQueue(queueData) {
           <a class="ghost-btn" href="${escapeHtml(currentlyPlaying.external_urls?.spotify || "#")}" target="_blank" rel="noopener noreferrer">
             Open in Spotify
           </a>
+          <a class="ghost-btn btn-lyrics" href="${escapeHtml(buildGeniusUrl((currentlyPlaying.artists || []).map((a) => a.name).join(", "), currentlyPlaying.name))}" target="_blank" rel="noopener noreferrer">Lyrics</a>
         </div>
       </div>
     `);
@@ -1207,6 +1223,7 @@ function renderSpotifyQueue(queueData) {
           <a class="ghost-btn" href="${escapeHtml(item.external_urls?.spotify || "#")}" target="_blank" rel="noopener noreferrer">
             Open in Spotify
           </a>
+          <a class="ghost-btn btn-lyrics" href="${escapeHtml(buildGeniusUrl((item.artists || []).map((a) => a.name).join(", "), item.name))}" target="_blank" rel="noopener noreferrer">Lyrics</a>
         </div>
       </div>
     `);
@@ -1322,6 +1339,21 @@ async function loadRequests() {
 }
 
 // ======================================================
+// MODERATION PANEL
+// ======================================================
+function openModerationPanel() {
+  document.getElementById("modOverlay")?.classList.add("mod-is-open");
+  document.getElementById("modBackdrop")?.classList.add("mod-is-open");
+  document.body.classList.add("mod-panel-open");
+}
+
+function closeModerationPanel() {
+  document.getElementById("modOverlay")?.classList.remove("mod-is-open");
+  document.getElementById("modBackdrop")?.classList.remove("mod-is-open");
+  document.body.classList.remove("mod-panel-open");
+}
+
+// ======================================================
 // EVENT WIRING
 // ======================================================
 function wireStaticEvents() {
@@ -1434,6 +1466,16 @@ function wireStaticEvents() {
         renderApprovedQueue();
       }
     }
+  });
+
+  el.btnOpenModeration?.addEventListener("click", () => openModerationPanel());
+
+  document.getElementById("btnCloseModeration")?.addEventListener("click", () => closeModerationPanel());
+
+  document.getElementById("modBackdrop")?.addEventListener("click", () => closeModerationPanel());
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeModerationPanel();
   });
 }
 

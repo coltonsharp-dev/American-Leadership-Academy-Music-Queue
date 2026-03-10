@@ -38,11 +38,11 @@
             <button id="btnLogout" class="btn" type="button">
               Logout
             </button>
-            <button id="btnLoadRequests" class="btn" type="button">
-              Load Requests
-            </button>
             <button id="btnStartDefaultPlaylist" class="btn btn-primary" type="button">
               Start Default Playlist
+            </button>
+            <button id="btnOpenModeration" class="btn btn-moderation" type="button">
+              Moderation Panel
             </button>
           </div>
         </div>
@@ -60,9 +60,6 @@
           <div class="queue-nav">
             <button id="btnRefreshPlayback" class="btn btn-small" type="button">
               Refresh
-            </button>
-            <button id="btnAddApprovedToQueue" class="btn btn-small btn-primary" type="button">
-              Add Selected Approved to Queue
             </button>
           </div>
         </div>
@@ -83,88 +80,108 @@
         </div>
       </section>
 
-      <section class="card up-next-card">
-        <div class="section-heading">
-          <div>
-            <p class="section-kicker">Approval Preview</p>
-            <h2>Selected Approved Song</h2>
-          </div>
-
-          <div class="queue-nav">
-            <button id="btnPrevQueue" class="btn btn-small" type="button">
-              Prev
-            </button>
-            <button id="btnNextQueue" class="btn btn-small" type="button">
-              Next
-            </button>
-          </div>
-        </div>
-
-        <div id="approvedPreviewTable" class="requests-list">
-          <div class="empty-state">No approved songs yet.</div>
-        </div>
-      </section>
-
-      <section class="card approved-card">
-        <div class="section-heading">
-          <div>
-            <p class="section-kicker">Moderator Queue</p>
-            <h2>Approved Songs</h2>
-          </div>
-        </div>
-
-        <div id="approvedQueueList" class="queue-list">
-          <div class="empty-state">No approved songs yet.</div>
-        </div>
-      </section>
-
-      <section class="card approved-card">
+      <section class="card spotify-queue-card">
         <div class="section-heading">
           <div>
             <p class="section-kicker">Spotify Playback Queue</p>
             <h2>Live Spotify Queue</h2>
           </div>
         </div>
-
         <div id="spotifyQueueList" class="requests-list">
           <div class="empty-state">Spotify queue will appear here.</div>
         </div>
       </section>
 
-      <section class="card requests-card">
-        <div class="section-heading requests-heading">
-          <div>
-            <p class="section-kicker">Moderation</p>
-            <h2>Unapproved Student Requests</h2>
-          </div>
+    </main>
+  </div>
 
+  <div id="modBackdrop" class="mod-backdrop"></div>
+
+  <aside id="modOverlay" class="mod-overlay" role="dialog" aria-modal="true" aria-label="Moderation Panel">
+    <div class="mod-overlay-header">
+      <div class="mod-overlay-title-row">
+        <div>
+          <p class="eyebrow">American Leadership Academy</p>
+          <h2>Moderation Panel</h2>
+        </div>
+        <div class="mod-header-actions">
           <label class="toggle-row" for="hideExplicitOnly">
             <input type="checkbox" id="hideExplicitOnly" />
             <span>Hide explicit</span>
           </label>
-        </div>
-
-        <div id="requestSummary" class="summary-text">
-          Loaded 0 request(s) | Valid Spotify links: 0 | Clean: 0 | Explicit: 0 | Errors: 0
-        </div>
-
-        <div class="queue-nav moderation-actions">
+          <button id="btnLoadRequests" class="btn btn-small" type="button">
+            Load Requests
+          </button>
           <button id="btnApproveAllCleanVisible" class="btn btn-small" type="button">
-            Approve All Clean Visible
+            Approve All Clean
           </button>
           <button id="btnUndoModerationAction" class="btn btn-small" type="button">
-            Undo Last Action
+            Undo
+          </button>
+          <button id="btnCloseModeration" class="btn mod-close-btn" type="button">
+            &#x2715; Close
           </button>
         </div>
+      </div>
+    </div>
 
-        <div id="requestTableBody" class="requests-list">
-          <div class="empty-state">
-            No unapproved requests available yet.
+    <div class="mod-overlay-body">
+      <div class="mod-grid">
+
+        <section class="card requests-card">
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">Moderation</p>
+              <h2>Unapproved Student Requests</h2>
+            </div>
           </div>
+          <div id="requestSummary" class="summary-text">
+            Loaded 0 request(s) | Valid Spotify links: 0 | Clean: 0 | Explicit: 0 | Errors: 0
+          </div>
+          <div id="requestTableBody" class="requests-list">
+            <div class="empty-state">
+              No unapproved requests available yet.
+            </div>
+          </div>
+        </section>
+
+        <div class="mod-right-stack">
+
+          <section class="card up-next-card">
+            <div class="section-heading">
+              <div>
+                <p class="section-kicker">Approval Preview</p>
+                <h2>Selected Approved Song</h2>
+              </div>
+              <div class="queue-nav">
+                <button id="btnPrevQueue" class="btn btn-small" type="button">Prev</button>
+                <button id="btnNextQueue" class="btn btn-small" type="button">Next</button>
+                <button id="btnAddApprovedToQueue" class="btn btn-small btn-primary" type="button">
+                  Add to Queue
+                </button>
+              </div>
+            </div>
+            <div id="approvedPreviewTable" class="requests-list">
+              <div class="empty-state">No approved songs yet.</div>
+            </div>
+          </section>
+
+          <section class="card approved-card">
+            <div class="section-heading">
+              <div>
+                <p class="section-kicker">Moderator Queue</p>
+                <h2>Approved Songs</h2>
+              </div>
+            </div>
+            <div id="approvedQueueList" class="queue-list">
+              <div class="empty-state">No approved songs yet.</div>
+            </div>
+          </section>
+
         </div>
-      </section>
-    </main>
-  </div>
+      </div>
+    </div>
+  </aside>
 
   <script src="app.js"></script>
 </body>
