@@ -2,16 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1.0"
-  />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ALA Music Queue</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
     rel="stylesheet"
   />
 
@@ -20,14 +17,20 @@
 <body>
   <div class="page-shell">
     <main class="dashboard">
-      <section class="card hero-card">
+
+      <!-- HERO -->
+      <section class="card hero-card neon-card hero-bento">
+        <div class="hero-glow hero-glow-a"></div>
+        <div class="hero-glow hero-glow-b"></div>
+
         <div class="hero-top">
           <div class="hero-copy">
             <p class="eyebrow">American Leadership Academy</p>
             <h1>Music Queue Dashboard</h1>
             <p class="hero-sub">
-              Review student song requests, approve clean tracks, start the default playlist,
-              and send approved songs to the Spotify queue while playback runs in another Spotify window or app.
+              Review student song requests, approve clean tracks, monitor live playback,
+              preview lyrics, control transport, and send approved songs to the Spotify queue
+              while playback runs in another Spotify window or app.
             </p>
           </div>
 
@@ -50,7 +53,10 @@
         <div id="status" class="status-pill">Ready.</div>
       </section>
 
-      <section class="card now-playing-card">
+      <!-- NOW PLAYING -->
+      <section class="card now-playing-card neon-card playback-bento">
+        <div class="card-accent card-accent-green"></div>
+
         <div class="section-heading">
           <div>
             <p class="section-kicker">Live Playback Preview</p>
@@ -58,35 +64,88 @@
           </div>
 
           <div class="queue-nav">
+            <button id="btnNowPlayingLyrics" class="btn btn-small btn-lyrics-action" type="button">
+              Lyrics Popup
+            </button>
             <button id="btnRefreshPlayback" class="btn btn-small" type="button">
               Refresh
             </button>
           </div>
         </div>
 
-        <div class="media-card media-card-large">
-          <img
-            id="nowPlayingArt"
-            class="media-art large"
-            src=""
-            alt="Now playing artwork"
-          />
-          <div class="media-copy">
-            <div id="nowPlaying" class="media-title">Nothing currently loaded</div>
-            <div id="nowPlayingMeta" class="media-meta">
-              Waiting for playback data...
+        <div class="playback-bento-grid">
+          <div class="media-card media-card-large media-card-3d">
+            <img
+              id="nowPlayingArt"
+              class="media-art large"
+              src=""
+              alt="Now playing artwork"
+            />
+            <div class="media-copy">
+              <div id="nowPlaying" class="media-title">Nothing currently loaded</div>
+              <div id="nowPlayingMeta" class="media-meta">
+                Waiting for playback data...
+              </div>
+
+              <div class="playback-time-wrap">
+                <div class="playback-time-row">
+                  <span class="time-label">Progress</span>
+                  <span id="nowPlayingProgressText" class="time-value">0:00</span>
+                </div>
+                <div class="playback-time-row">
+                  <span class="time-label">Remaining</span>
+                  <span id="nowPlayingRemaining" class="time-value">--:--</span>
+                </div>
+                <div class="playback-progress-shell">
+                  <div id="nowPlayingProgressBar" class="playback-progress-bar"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="transport-card">
+            <div class="transport-card-head">
+              <p class="section-kicker">Playback Controls</p>
+              <h3 class="transport-title">Live Transport</h3>
+            </div>
+
+            <div class="transport-controls">
+              <button id="btnPrevTrack" class="btn transport-btn" type="button" aria-label="Previous track">
+                Previous
+              </button>
+              <button id="btnPlayPause" class="btn btn-primary transport-btn transport-btn-main" type="button" aria-label="Play or pause">
+                Play / Pause
+              </button>
+              <button id="btnNextTrack" class="btn transport-btn" type="button" aria-label="Next track">
+                Next
+              </button>
+            </div>
+
+            <div class="transport-meta">
+              <div class="transport-chip">
+                <span class="chip-label">Live</span>
+                <span class="chip-value" id="playbackStateLabel">Playback Ready</span>
+              </div>
+              <div class="transport-chip">
+                <span class="chip-label">Queue</span>
+                <span class="chip-value">Spotify Connected</span>
+              </div>
             </div>
           </div>
         </div>
       </section>
 
-      <section class="card spotify-queue-card">
+      <!-- SPOTIFY QUEUE -->
+      <section class="card spotify-queue-card neon-card queue-bento">
+        <div class="card-accent card-accent-blue"></div>
+
         <div class="section-heading">
           <div>
             <p class="section-kicker">Spotify Playback Queue</p>
             <h2>Live Spotify Queue</h2>
           </div>
         </div>
+
         <div id="spotifyQueueList" class="requests-list">
           <div class="empty-state">Spotify queue will appear here.</div>
         </div>
@@ -95,29 +154,42 @@
     </main>
   </div>
 
+  <!-- MODERATION BACKDROP -->
   <div id="modBackdrop" class="mod-backdrop"></div>
 
-  <aside id="modOverlay" class="mod-overlay" role="dialog" aria-modal="true" aria-label="Moderation Panel">
+  <!-- MODERATION PANEL -->
+  <aside
+    id="modOverlay"
+    class="mod-overlay"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Moderation Panel"
+  >
     <div class="mod-overlay-header">
       <div class="mod-overlay-title-row">
         <div>
           <p class="eyebrow">American Leadership Academy</p>
           <h2>Moderation Panel</h2>
         </div>
+
         <div class="mod-header-actions">
           <label class="toggle-row" for="hideExplicitOnly">
             <input type="checkbox" id="hideExplicitOnly" />
             <span>Hide explicit</span>
           </label>
+
           <button id="btnLoadRequests" class="btn btn-small" type="button">
             Load Requests
           </button>
+
           <button id="btnApproveAllCleanVisible" class="btn btn-small" type="button">
             Approve All Clean
           </button>
+
           <button id="btnUndoModerationAction" class="btn btn-small" type="button">
             Undo
           </button>
+
           <button id="btnCloseModeration" class="btn mod-close-btn" type="button">
             &#x2715; Close
           </button>
@@ -126,16 +198,21 @@
     </div>
 
     <div class="mod-overlay-body">
-      <section class="card search-card mod-top-search-card">
+
+      <!-- MODERATOR SEARCH -->
+      <section class="card search-card mod-top-search-card neon-card">
         <div class="section-heading">
           <div>
             <p class="section-kicker">Moderator Override</p>
             <h2>Search Spotify and Add Exact Track</h2>
           </div>
         </div>
+
         <div class="summary-text">
-          Search Spotify, review the exact result, and add it straight to the moderator queue. Moderator adds can override the normal clean-only approval path.
+          Search Spotify, verify the exact result, and add it directly to the moderator queue.
+          Moderator adds can override the normal clean-only approval path.
         </div>
+
         <div class="search-controls">
           <input
             id="manualSearchInput"
@@ -148,23 +225,29 @@
             Search
           </button>
         </div>
+
         <div id="manualSearchResults" class="requests-list">
-          <div class="empty-state">Search Spotify to verify and add the exact track you want.</div>
+          <div class="empty-state">
+            Search Spotify to verify and add the exact track you want.
+          </div>
         </div>
       </section>
 
       <div class="mod-grid">
 
-        <section class="card requests-card">
+        <!-- REQUESTS -->
+        <section class="card requests-card neon-card">
           <div class="section-heading">
             <div>
               <p class="section-kicker">Moderation</p>
               <h2>Unapproved Student Requests</h2>
             </div>
           </div>
+
           <div id="requestSummary" class="summary-text">
             Loaded 0 request(s) | Valid Spotify links: 0 | Clean: 0 | Explicit: 0 | Errors: 0
           </div>
+
           <div id="requestTableBody" class="requests-list">
             <div class="empty-state">
               No unapproved requests available yet.
@@ -174,43 +257,97 @@
 
         <div class="mod-right-stack">
 
-          <section class="card up-next-card">
+          <!-- APPROVAL PREVIEW -->
+          <section class="card up-next-card neon-card up-next-card-expanded">
+            <div class="card-accent card-accent-violet"></div>
+
             <div class="section-heading">
               <div>
                 <p class="section-kicker">Approval Preview</p>
                 <h2>Selected Approved Song</h2>
               </div>
+
               <div class="queue-nav">
-                <button id="btnPrevQueue" class="btn btn-small" type="button">Prev</button>
-                <button id="btnNextQueue" class="btn btn-small" type="button">Next</button>
+                <button id="btnPrevQueue" class="btn btn-small" type="button">
+                  Prev
+                </button>
+                <button id="btnNextQueue" class="btn btn-small" type="button">
+                  Next
+                </button>
                 <button id="btnAddApprovedToQueue" class="btn btn-small btn-primary" type="button">
                   Add to Queue
                 </button>
               </div>
             </div>
-            <div id="approvedPreviewTable" class="requests-list">
+
+            <div id="approvedPreviewTable" class="requests-list approved-preview-large">
               <div class="empty-state">No approved songs yet.</div>
             </div>
           </section>
 
-          <section class="card approved-card">
+          <!-- APPROVED QUEUE -->
+          <section class="card approved-card neon-card">
             <div class="section-heading">
               <div>
                 <p class="section-kicker">Moderator Queue</p>
                 <h2>Approved Songs</h2>
               </div>
+
               <div class="queue-nav">
                 <button id="btnRemoveAllApproved" class="btn btn-small" type="button">
                   Remove All
                 </button>
               </div>
             </div>
+
             <div id="approvedQueueList" class="queue-list">
               <div class="empty-state">No approved songs yet.</div>
             </div>
           </section>
 
         </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- LYRICS POPUP -->
+  <div id="lyricsBackdrop" class="lyrics-backdrop"></div>
+
+  <aside
+    id="lyricsModal"
+    class="lyrics-modal"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Lyrics Popup"
+  >
+    <div class="lyrics-modal-header">
+      <div>
+        <p class="eyebrow">Live Lyrics</p>
+        <h2 id="lyricsModalTitle">Lyrics Preview</h2>
+        <p id="lyricsModalMeta" class="lyrics-modal-meta">
+          Waiting for track selection...
+        </p>
+      </div>
+
+      <div class="lyrics-modal-actions">
+        <a
+          id="lyricsModalOpenLink"
+          class="btn btn-small btn-lyrics-action"
+          href="#"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Open Full Lyrics
+        </a>
+        <button id="btnCloseLyrics" class="btn lyrics-close-btn" type="button">
+          &#x2715; Close
+        </button>
+      </div>
+    </div>
+
+    <div class="lyrics-modal-body">
+      <div id="lyricsEmbedMount" class="lyrics-embed-mount">
+        <div class="empty-state">Choose a song to preview lyrics.</div>
       </div>
     </div>
   </aside>
