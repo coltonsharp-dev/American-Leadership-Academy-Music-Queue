@@ -1,6 +1,13 @@
 // ======================================================
-// ALA Music Requester Dashboard
-// One-page version with default playlist + queue viewer
+// ALA Music Queue Dashboard
+// Polished single-file app.js
+// - Spotify PKCE login
+// - Live playback preview
+// - Previous / Play-Pause / Next transport
+// - Time progress + remaining
+// - Google Sheet request moderation
+// - Approved queue flow
+// - Genius lyrics popup with official embed support
 // ======================================================
 
 // --------------------
@@ -20,6 +27,7 @@ const CONFIG = {
     "user-read-currently-playing"
   ],
   playbackPollMs: 15000,
+  localProgressTickMs: 1000,
   trackLookupConcurrency: 5,
   trackLookupRetryCount: 2,
   trackLookupRetryDelayMs: 500,
@@ -57,11 +65,20 @@ const el = {
   btnUndoModerationAction: document.getElementById("btnUndoModerationAction"),
   btnOpenModeration: document.getElementById("btnOpenModeration"),
   btnSearchSongs: document.getElementById("btnSearchSongs"),
+  btnNowPlayingLyrics: document.getElementById("btnNowPlayingLyrics"),
+  btnCloseLyrics: document.getElementById("btnCloseLyrics"),
+  btnPrevTrack: document.getElementById("btnPrevTrack"),
+  btnPlayPause: document.getElementById("btnPlayPause"),
+  btnNextTrack: document.getElementById("btnNextTrack"),
 
   status: document.getElementById("status"),
   nowPlaying: document.getElementById("nowPlaying"),
   nowPlayingMeta: document.getElementById("nowPlayingMeta"),
   nowPlayingArt: document.getElementById("nowPlayingArt"),
+  nowPlayingProgressText: document.getElementById("nowPlayingProgressText"),
+  nowPlayingRemaining: document.getElementById("nowPlayingRemaining"),
+  nowPlayingProgressBar: document.getElementById("nowPlayingProgressBar"),
+  playbackStateLabel: document.getElementById("playbackStateLabel"),
 
   hideExplicitOnly: document.getElementById("hideExplicitOnly"),
   requestSummary: document.getElementById("requestSummary"),
@@ -70,7 +87,14 @@ const el = {
   approvedPreviewTable: document.getElementById("approvedPreviewTable"),
   spotifyQueueList: document.getElementById("spotifyQueueList"),
   manualSearchInput: document.getElementById("manualSearchInput"),
-  manualSearchResults: document.getElementById("manualSearchResults")
+  manualSearchResults: document.getElementById("manualSearchResults"),
+
+  lyricsBackdrop: document.getElementById("lyricsBackdrop"),
+  lyricsModal: document.getElementById("lyricsModal"),
+  lyricsModalTitle: document.getElementById("lyricsModalTitle"),
+  lyricsModalMeta: document.getElementById("lyricsModalMeta"),
+  lyricsModalOpenLink: document.getElementById("lyricsModalOpenLink"),
+  lyricsEmbedMount: document.getElementById("lyricsEmbedMount")
 };
 
 // --------------------
@@ -78,9 +102,24 @@ const el = {
 // --------------------
 let currentRequests = [];
 let playbackTimer = null;
+let localProgressTimer = null;
 const moderationHistory = [];
 let isUndoingModeration = false;
 let manualSearchResults = [];
+
+let currentNowPlayingTrack = null;
+let currentSpotifyQueueTracks = [];
+let currentPlaybackProgressMs = 0;
+let currentPlaybackDurationMs = 0;
+let isPlaybackActive = false;
+let activeLyricsScript = null;
+
+// --------------------
+// GENIUS OVERRIDES
+// --------------------
+const GENIUS_ID_OVERRIDES = {
+  "https://genius.com/corinne-bailey-rae-put-your-records-on-lyrics": "181231"
+};
 
 // ======================================================
 // BASIC HELPERS
@@ -108,7 +147,7 @@ function safeJsonParse(value, fallback) {
 }
 
 function msToMinSec(ms) {
-  const totalSeconds = Math.floor(Number(ms || 0) / 1000);
+  const totalSeconds = Math.max(0, Math.floor(Number(ms || 0) / 1000));
   const min = Math.floor(totalSeconds / 60);
   const sec = totalSeconds % 60;
   return `${min}:${String(sec).padStart(2, "0")}`;
@@ -116,17 +155,6 @@ function msToMinSec(ms) {
 
 function spotifyTrackUrl(trackId) {
   return `https://open.spotify.com/track/${trackId}`;
-}
-
-function buildGeniusUrl(artist, song) {
-  const slugify = (str) =>
-    String(str || "")
-      .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, "")
-      .trim()
-      .replace(/\s+/g, "-");
-  const primaryArtist = String(artist || "").split(/,|&/)[0].trim();
-  return `https://genius.com/${slugify(primaryArtist)}-${slugify(song)}-lyrics`;
 }
 
 function normalizeHeader(value) {
@@ -142,45 +170,6 @@ function buildRequestId(row) {
 
 function isTrackObject(item) {
   return !!item && item.type === "track";
-}
-
-function normalizeSpotifyTrack(track) {
-  if (!track) return null;
-
-  const artistNames = Array.isArray(track.artists)
-    ? track.artists.map((artist) => artist?.name).filter(Boolean).join(", ")
-    : String(track.artist || "").trim();
-
-  return {
-    id: track.id,
-    uri: track.uri,
-    name: track.name,
-    artist: artistNames || "Unknown Artist",
-    explicit: !!track.explicit,
-    durationMs: track.duration_ms ?? track.durationMs ?? 0,
-    externalUrl:
-      track.external_urls?.spotify ||
-      track.externalUrl ||
-      (track.id ? spotifyTrackUrl(track.id) : ""),
-    album: track.album?.name || track.album || "",
-    image:
-      track.album?.images?.[0]?.url ||
-      track.album?.images?.[1]?.url ||
-      track.album?.images?.[2]?.url ||
-      track.image || ""
-  };
-}
-
-function getRedirectUri() {
-  if (!window?.location?.origin || !window?.location?.pathname) {
-    return CONFIG.redirectUriFallback;
-  }
-
-  const path = window.location.pathname.endsWith(".html")
-    ? window.location.pathname.replace(/[^/]+$/, "")
-    : window.location.pathname;
-
-  return `${window.location.origin}${path}`;
 }
 
 function wait(ms) {
@@ -212,6 +201,62 @@ function getVisibleUnapprovedRequests(requests) {
     if (hideExplicit && request.spotify && request.spotify.explicit === true) return false;
     return true;
   });
+}
+
+function updatePlaybackProgressUI(progressMs, durationMs) {
+  if (el.nowPlayingProgressText) {
+    el.nowPlayingProgressText.textContent = msToMinSec(progressMs);
+  }
+
+  if (el.nowPlayingRemaining) {
+    const remaining = Math.max(0, durationMs - progressMs);
+    el.nowPlayingRemaining.textContent = `-${msToMinSec(remaining)}`;
+  }
+
+  if (el.nowPlayingProgressBar) {
+    const pct = durationMs > 0 ? Math.min(100, Math.max(0, (progressMs / durationMs) * 100)) : 0;
+    el.nowPlayingProgressBar.style.width = `${pct}%`;
+  }
+}
+
+function updatePlaybackStateLabel() {
+  if (!el.playbackStateLabel) return;
+
+  if (!currentNowPlayingTrack) {
+    el.playbackStateLabel.textContent = "No Active Song";
+    return;
+  }
+
+  el.playbackStateLabel.textContent = isPlaybackActive ? "Playing" : "Paused";
+}
+
+function setTransportBusy(isBusy) {
+  const buttons = [el.btnPrevTrack, el.btnPlayPause, el.btnNextTrack];
+  for (const button of buttons) {
+    if (button) button.disabled = !!isBusy;
+  }
+}
+
+function startLocalProgressTimer() {
+  stopLocalProgressTimer();
+
+  localProgressTimer = window.setInterval(() => {
+    if (!currentNowPlayingTrack || !isPlaybackActive) return;
+
+    currentPlaybackProgressMs = Math.min(
+      currentPlaybackDurationMs,
+      currentPlaybackProgressMs + CONFIG.localProgressTickMs
+    );
+
+    updatePlaybackProgressUI(currentPlaybackProgressMs, currentPlaybackDurationMs);
+  }, CONFIG.localProgressTickMs);
+}
+
+function stopLocalProgressTimer() {
+  if (localProgressTimer) {
+    window.clearInterval(localProgressTimer);
+    localProgressTimer = null;
+  }
 }
 
 // ======================================================
@@ -312,7 +357,7 @@ function parseCSV(text) {
 
     if (ch === '"' && inQuotes && next === '"') {
       current += '"';
-      i++;
+      i += 1;
       continue;
     }
 
@@ -328,7 +373,7 @@ function parseCSV(text) {
     }
 
     if ((ch === "\n" || ch === "\r") && !inQuotes) {
-      if (ch === "\r" && next === "\n") i++;
+      if (ch === "\r" && next === "\n") i += 1;
       row.push(current);
       rows.push(row);
       row = [];
@@ -365,6 +410,179 @@ function extractSpotifyTrackId(url) {
 }
 
 // ======================================================
+// GENIUS HELPERS
+// ======================================================
+function normalizeGeniusUrl(url) {
+  return String(url || "")
+    .trim()
+    .replace(/^http:/i, "https:")
+    .replace(/\/+$/, "")
+    .toLowerCase();
+}
+
+function getGeniusSongIdFromUrl(url) {
+  const normalized = normalizeGeniusUrl(url);
+  return GENIUS_ID_OVERRIDES[normalized] || "";
+}
+
+function buildGeniusUrl(artist, song) {
+  const slugify = (str) =>
+    String(str || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, "")
+      .trim()
+      .replace(/\s+/g, "-");
+
+  const primaryArtist = String(artist || "").split(/,|&/)[0].trim();
+  return `https://genius.com/${slugify(primaryArtist)}-${slugify(song)}-lyrics`;
+}
+
+function clearLyricsEmbed() {
+  if (activeLyricsScript && activeLyricsScript.parentNode) {
+    activeLyricsScript.parentNode.removeChild(activeLyricsScript);
+  }
+  activeLyricsScript = null;
+
+  if (el.lyricsEmbedMount) {
+    el.lyricsEmbedMount.innerHTML = `
+      <div class="lyrics-loading">Preparing lyrics preview...</div>
+    `;
+  }
+}
+
+function openLyricsModalShell(title, meta, url) {
+  if (el.lyricsModalTitle) el.lyricsModalTitle.textContent = title || "Lyrics Preview";
+  if (el.lyricsModalMeta) el.lyricsModalMeta.textContent = meta || "Lyrics preview";
+
+  if (el.lyricsModalOpenLink) {
+    el.lyricsModalOpenLink.href = url || "#";
+    el.lyricsModalOpenLink.style.pointerEvents = url ? "auto" : "none";
+    el.lyricsModalOpenLink.style.opacity = url ? "1" : "0.45";
+  }
+
+  el.lyricsBackdrop?.classList.add("lyrics-is-open");
+  el.lyricsModal?.classList.add("lyrics-is-open");
+  document.body.classList.add("mod-panel-open");
+}
+
+function closeLyricsModal() {
+  el.lyricsBackdrop?.classList.remove("lyrics-is-open");
+  el.lyricsModal?.classList.remove("lyrics-is-open");
+
+  const modOpen = document.getElementById("modOverlay")?.classList.contains("mod-is-open");
+  if (!modOpen) {
+    document.body.classList.remove("mod-panel-open");
+  }
+}
+
+function renderLyricsFallback(url, title, artist) {
+  if (!el.lyricsEmbedMount) return;
+
+  el.lyricsEmbedMount.innerHTML = `
+    <div class="lyrics-fallback">
+      <div class="lyrics-fallback-title">${escapeHtml(title || "Lyrics unavailable")}</div>
+      <div class="lyrics-fallback-copy">
+        The Genius popup is open, but this track does not yet have a mapped Genius song ID inside the dashboard.
+        Add the song URL and Genius ID to the local override map to render the official embed here.
+      </div>
+      <div class="request-meta">${escapeHtml(artist || "Unknown artist")}</div>
+      ${
+        url
+          ? `<a class="btn btn-small btn-lyrics-action" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">Open Full Lyrics</a>`
+          : ""
+      }
+    </div>
+  `;
+}
+
+function renderGeniusEmbed(songId, url, title, artist) {
+  clearLyricsEmbed();
+
+  if (!songId) {
+    renderLyricsFallback(url, title, artist);
+    return;
+  }
+
+  const embedId = `rg_embed_link_${songId}_${Date.now()}`;
+
+  if (el.lyricsEmbedMount) {
+    el.lyricsEmbedMount.innerHTML = `
+      <div
+        id="${embedId}"
+        class="rg_embed_link"
+        data-song-id="${escapeHtml(songId)}"
+        style="color:#f4f7fb;"
+      >
+        Read <a href="${escapeHtml(url || "#")}" target="_blank" rel="noopener noreferrer">${escapeHtml(title || "this song")}</a> on Genius
+      </div>
+    `;
+  }
+
+  const script = document.createElement("script");
+  script.src = `https://genius.com/songs/${encodeURIComponent(songId)}/embed.js`;
+  script.crossOrigin = "anonymous";
+  script.async = true;
+  activeLyricsScript = script;
+  document.body.appendChild(script);
+}
+
+function openLyricsModal(payload = {}) {
+  const url = payload.url || "";
+  const title = payload.title || "Lyrics Preview";
+  const artist = payload.artist || "Unknown Artist";
+  const songId = payload.songId || getGeniusSongIdFromUrl(url);
+  const meta = artist ? artist : "Lyrics preview";
+
+  openLyricsModalShell(title, meta, url);
+  renderGeniusEmbed(songId, url, title, artist);
+}
+
+function createLyricsButtonHtml({ url = "", songId = "", title = "", artist = "" } = {}) {
+  return `
+    <button
+      class="ghost-btn btn-lyrics lyrics-popup-btn"
+      type="button"
+      data-genius-url="${escapeHtml(url)}"
+      data-genius-song-id="${escapeHtml(songId)}"
+      data-title="${escapeHtml(title)}"
+      data-artist="${escapeHtml(artist)}"
+    >
+      Lyrics
+    </button>
+  `;
+}
+
+// ======================================================
+// NORMALIZE SPOTIFY TRACK
+// ======================================================
+function normalizeSpotifyTrack(track) {
+  if (!track) return null;
+
+  const artistNames = Array.isArray(track.artists)
+    ? track.artists.map((artist) => artist?.name).filter(Boolean).join(", ")
+    : String(track.artist || "").trim();
+
+  return {
+    id: track.id,
+    uri: track.uri,
+    name: track.name,
+    artist: artistNames || "Unknown Artist",
+    explicit: !!track.explicit,
+    durationMs: track.duration_ms ?? track.durationMs ?? 0,
+    externalUrl:
+      track.external_urls?.spotify ||
+      track.externalUrl ||
+      (track.id ? spotifyTrackUrl(track.id) : ""),
+    album: track.album?.name || track.album || "",
+    image:
+      track.album?.images?.[0]?.url ||
+      track.album?.images?.[1]?.url ||
+      track.album?.images?.[2]?.url ||
+      track.image || ""
+  };
+}
+
+// ======================================================
 // PKCE AUTH HELPERS
 // ======================================================
 function randomString(length = 64) {
@@ -397,6 +615,18 @@ function base64UrlEncode(buffer) {
 async function createCodeChallenge(verifier) {
   const digest = await sha256(verifier);
   return base64UrlEncode(digest);
+}
+
+function getRedirectUri() {
+  if (!window?.location?.origin || !window?.location?.pathname) {
+    return CONFIG.redirectUriFallback;
+  }
+
+  const path = window.location.pathname.endsWith(".html")
+    ? window.location.pathname.replace(/[^/]+$/, "")
+    : window.location.pathname;
+
+  return `${window.location.origin}${path}`;
 }
 
 // ======================================================
@@ -486,6 +716,7 @@ async function handleSpotifyCallback() {
 
   url.searchParams.delete("code");
   url.searchParams.delete("state");
+  url.searchParams.delete("error");
   window.history.replaceState({}, document.title, url.toString());
   localStorage.removeItem(LS.oauthState);
 
@@ -540,6 +771,18 @@ function logoutSpotify() {
   localStorage.removeItem(LS.expiresAt);
   localStorage.removeItem(LS.pkceVerifier);
   localStorage.removeItem(LS.oauthState);
+
+  stopPlaybackPolling();
+  stopLocalProgressTimer();
+
+  currentNowPlayingTrack = null;
+  currentSpotifyQueueTracks = [];
+  currentPlaybackProgressMs = 0;
+  currentPlaybackDurationMs = 0;
+  isPlaybackActive = false;
+
+  resetNowPlayingUI();
+  renderSpotifyQueue(null);
   setStatus("Logged out of Spotify.");
 }
 
@@ -591,6 +834,27 @@ async function spotifyFetch(path, options = {}) {
   }
 
   return response.json();
+}
+
+async function spotifyNoContent(path, options = {}) {
+  const token = await getAccessToken();
+  if (!token) throw new Error("Spotify login required.");
+
+  const response = await fetch(`https://api.spotify.com/v1${path}`, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      ...(options.headers || {})
+    }
+  });
+
+  if (!response.ok && response.status !== 204) {
+    const text = await response.text();
+    throw new Error(`${response.status} ${text}`);
+  }
+
+  return true;
 }
 
 async function getCurrentUserProfile() {
@@ -711,6 +975,34 @@ async function addTrackToSpotifyQueue(trackUri) {
   }
 }
 
+async function pausePlayback() {
+  await ensureActiveDevice();
+  await spotifyNoContent("/me/player/pause", { method: "PUT" });
+}
+
+async function resumePlayback() {
+  await ensureActiveDevice();
+  await spotifyNoContent("/me/player/play", { method: "PUT" });
+}
+
+async function skipToNextTrack() {
+  await ensureActiveDevice();
+  await spotifyNoContent("/me/player/next", { method: "POST" });
+}
+
+async function skipToPreviousTrack() {
+  await ensureActiveDevice();
+  await spotifyNoContent("/me/player/previous", { method: "POST" });
+}
+
+async function togglePlayPause() {
+  if (isPlaybackActive) {
+    await pausePlayback();
+  } else {
+    await resumePlayback();
+  }
+}
+
 // ======================================================
 // GOOGLE SHEET REQUEST LOADING
 // ======================================================
@@ -820,7 +1112,6 @@ async function enrichRequestRows(rows) {
 
       try {
         const track = await getTrackByIdWithRetry(trackId);
-
         result.spotify = normalizeSpotifyTrack(track);
       } catch (error) {
         result.error = error?.message || "Spotify lookup failed";
@@ -906,10 +1197,12 @@ function approveRequest(request, options = {}) {
   if (selectAdded) {
     setQueuePointer(queue.length - 1);
   }
+
   pushModerationHistory({
     type: "approve",
     requestId: request.requestId
   });
+
   renderApprovedQueue();
   renderRequests(currentRequests);
   renderApprovedPreview();
@@ -925,10 +1218,12 @@ function rejectRequest(request) {
   const rejected = getRejectedIds();
   rejected.add(request.requestId);
   saveRejectedIds(rejected);
+
   pushModerationHistory({
     type: "reject",
     requestId: request.requestId
   });
+
   renderRequests(currentRequests);
   setStatus("Request removed from unapproved list.");
 }
@@ -939,6 +1234,7 @@ function removeApproved(requestId) {
 
 function removeApprovedItem(requestId, options = {}) {
   const { silentStatus = false, skipHistory = false } = options;
+
   const existingQueue = getApprovedQueue();
   const removedIndex = existingQueue.findIndex((item) => item.requestId === requestId);
   const removedItem = removedIndex >= 0 ? existingQueue[removedIndex] : null;
@@ -1069,6 +1365,9 @@ function undoLastModerationAction() {
   }
 }
 
+// ======================================================
+// RENDER HELPERS
+// ======================================================
 function renderManualSearchResults() {
   if (!el.manualSearchResults) return;
 
@@ -1127,9 +1426,6 @@ function renderManualSearchResults() {
     .join("");
 }
 
-// ======================================================
-// RENDER REQUESTS
-// ======================================================
 function renderRequests(requests) {
   if (!el.requestTableBody) return;
 
@@ -1163,6 +1459,7 @@ function renderRequests(requests) {
         : "Error";
 
       const approveDisabled = !request.spotify || request.spotify.explicit ? "disabled" : "";
+      const geniusUrl = request.spotify ? buildGeniusUrl(request.spotify.artist, request.spotify.name) : "";
 
       return `
         <div class="request-item">
@@ -1184,16 +1481,21 @@ function renderRequests(requests) {
             <div class="request-meta">
               ${escapeHtml(album)} • ${request.spotify ? escapeHtml(msToMinSec(request.spotify.durationMs)) : "—"}
             </div>
-            <div class="request-submitted">
-              ${escapeHtml(request.timestamp || "—")}
-            </div>
+            <div class="request-submitted">${escapeHtml(request.timestamp || "—")}</div>
           </div>
 
           <div class="request-actions">
             ${
               request.spotify
-                ? `<a class="ghost-btn" href="${escapeHtml(request.spotify.externalUrl)}" target="_blank" rel="noopener noreferrer">Open in Spotify</a>
-                <a class="ghost-btn btn-lyrics" href="${escapeHtml(buildGeniusUrl(request.spotify.artist, request.spotify.name))}" target="_blank" rel="noopener noreferrer">Lyrics</a>`
+                ? `
+                  <a class="ghost-btn" href="${escapeHtml(request.spotify.externalUrl)}" target="_blank" rel="noopener noreferrer">Open in Spotify</a>
+                  ${createLyricsButtonHtml({
+                    url: geniusUrl,
+                    songId: getGeniusSongIdFromUrl(geniusUrl),
+                    title: request.spotify.name,
+                    artist: request.spotify.artist
+                  })}
+                `
                 : `<span class="error-text">${escapeHtml(request.error || "No match")}</span>`
             }
 
@@ -1235,6 +1537,8 @@ function renderApprovedQueue() {
         ? '<span class="badge badge-override">Moderator</span>'
         : "";
 
+      const geniusUrl = buildGeniusUrl(artist, name);
+
       return `
         <div class="queue-item${activeClass}" data-queue-index="${index}">
           <div class="queue-item-art-wrap">
@@ -1254,7 +1558,12 @@ function renderApprovedQueue() {
           </div>
 
           <div class="queue-item-actions">
-            <a class="ghost-btn btn-lyrics" href="${escapeHtml(buildGeniusUrl(artist, name))}" target="_blank" rel="noopener noreferrer">Lyrics</a>
+            ${createLyricsButtonHtml({
+              url: geniusUrl,
+              songId: getGeniusSongIdFromUrl(geniusUrl),
+              title: name,
+              artist
+            })}
             <button class="remove-approved-btn" data-request-id="${escapeHtml(item.requestId)}">
               Remove
             </button>
@@ -1288,6 +1597,7 @@ function renderApprovedPreview() {
   const item = current.spotify;
   const statusBadge = current.source === "moderator" ? "Moderator Override" : "Approved";
   const statusClass = current.source === "moderator" ? "badge-override" : "badge-clean";
+  const geniusUrl = buildGeniusUrl(item.artist, item.name);
 
   el.approvedPreviewTable.innerHTML = `
     <div class="request-item queue-item-active">
@@ -1316,7 +1626,12 @@ function renderApprovedPreview() {
         <a class="ghost-btn" href="${escapeHtml(item.externalUrl || "#")}" target="_blank" rel="noopener noreferrer">
           Open in Spotify
         </a>
-        <a class="ghost-btn btn-lyrics" href="${escapeHtml(buildGeniusUrl(item.artist, item.name))}" target="_blank" rel="noopener noreferrer">Lyrics</a>
+        ${createLyricsButtonHtml({
+          url: geniusUrl,
+          songId: getGeniusSongIdFromUrl(geniusUrl),
+          title: item.name,
+          artist: item.artist
+        })}
       </div>
     </div>
   `;
@@ -1336,6 +1651,9 @@ function renderSpotifyQueue(queueData) {
   const blocks = [];
 
   if (currentlyPlaying && isTrackObject(currentlyPlaying)) {
+    const currentArtist = (currentlyPlaying.artists || []).map((a) => a.name).join(", ");
+    const currentGeniusUrl = buildGeniusUrl(currentArtist, currentlyPlaying.name);
+
     blocks.push(`
       <div class="request-item queue-item-active">
         <div class="request-art-wrap">
@@ -1352,9 +1670,7 @@ function renderSpotifyQueue(queueData) {
             <span class="badge badge-clean">Now Playing</span>
           </div>
 
-          <div class="request-artist">${escapeHtml(
-            (currentlyPlaying.artists || []).map((a) => a.name).join(", ") || "Unknown artist"
-          )}</div>
+          <div class="request-artist">${escapeHtml(currentArtist || "Unknown artist")}</div>
           <div class="request-meta">
             ${escapeHtml(currentlyPlaying.album?.name || "Unknown Album")} • ${escapeHtml(msToMinSec(currentlyPlaying.duration_ms))}
           </div>
@@ -1364,7 +1680,12 @@ function renderSpotifyQueue(queueData) {
           <a class="ghost-btn" href="${escapeHtml(currentlyPlaying.external_urls?.spotify || "#")}" target="_blank" rel="noopener noreferrer">
             Open in Spotify
           </a>
-          <a class="ghost-btn btn-lyrics" href="${escapeHtml(buildGeniusUrl((currentlyPlaying.artists || []).map((a) => a.name).join(", "), currentlyPlaying.name))}" target="_blank" rel="noopener noreferrer">Lyrics</a>
+          ${createLyricsButtonHtml({
+            url: currentGeniusUrl,
+            songId: getGeniusSongIdFromUrl(currentGeniusUrl),
+            title: currentlyPlaying.name,
+            artist: currentArtist
+          })}
         </div>
       </div>
     `);
@@ -1372,6 +1693,9 @@ function renderSpotifyQueue(queueData) {
 
   queue.forEach((item, index) => {
     if (!isTrackObject(item)) return;
+
+    const artist = (item.artists || []).map((a) => a.name).join(", ");
+    const geniusUrl = buildGeniusUrl(artist, item.name);
 
     blocks.push(`
       <div class="request-item">
@@ -1389,9 +1713,7 @@ function renderSpotifyQueue(queueData) {
             <span class="badge badge-clean">Queue #${index + 1}</span>
           </div>
 
-          <div class="request-artist">${escapeHtml(
-            (item.artists || []).map((a) => a.name).join(", ") || "Unknown artist"
-          )}</div>
+          <div class="request-artist">${escapeHtml(artist || "Unknown artist")}</div>
           <div class="request-meta">
             ${escapeHtml(item.album?.name || "Unknown Album")} • ${escapeHtml(msToMinSec(item.duration_ms))}
           </div>
@@ -1401,7 +1723,12 @@ function renderSpotifyQueue(queueData) {
           <a class="ghost-btn" href="${escapeHtml(item.external_urls?.spotify || "#")}" target="_blank" rel="noopener noreferrer">
             Open in Spotify
           </a>
-          <a class="ghost-btn btn-lyrics" href="${escapeHtml(buildGeniusUrl((item.artists || []).map((a) => a.name).join(", "), item.name))}" target="_blank" rel="noopener noreferrer">Lyrics</a>
+          ${createLyricsButtonHtml({
+            url: geniusUrl,
+            songId: getGeniusSongIdFromUrl(geniusUrl),
+            title: item.name,
+            artist
+          })}
         </div>
       </div>
     `);
@@ -1413,6 +1740,20 @@ function renderSpotifyQueue(queueData) {
 // ======================================================
 // PLAYBACK PREVIEW
 // ======================================================
+function resetNowPlayingUI() {
+  if (el.nowPlaying) el.nowPlaying.textContent = "Nothing currently loaded";
+  if (el.nowPlayingMeta) el.nowPlayingMeta.textContent = "Waiting for playback data...";
+  if (el.nowPlayingArt) {
+    el.nowPlayingArt.src = "";
+    el.nowPlayingArt.style.visibility = "hidden";
+  }
+
+  currentPlaybackProgressMs = 0;
+  currentPlaybackDurationMs = 0;
+  updatePlaybackProgressUI(0, 0);
+  updatePlaybackStateLabel();
+}
+
 async function refreshPlayback() {
   if (!el.nowPlaying || !el.nowPlayingMeta) return;
 
@@ -1422,45 +1763,74 @@ async function refreshPlayback() {
       getSpotifyQueue().catch(() => null)
     ]);
 
+    currentNowPlayingTrack = playbackData?.item || null;
+    currentSpotifyQueueTracks = Array.isArray(queueData?.queue) ? queueData.queue : [];
+    isPlaybackActive = !!playbackData?.is_playing;
+
     if (!playbackData || !playbackData.item) {
-      el.nowPlaying.textContent = "Nothing currently loaded";
-      el.nowPlayingMeta.textContent = "Waiting for playback data...";
+      currentNowPlayingTrack = null;
+      currentSpotifyQueueTracks = [];
+      currentPlaybackProgressMs = 0;
+      currentPlaybackDurationMs = 0;
+      isPlaybackActive = false;
 
-      if (el.nowPlayingArt) {
-        el.nowPlayingArt.src = "";
-        el.nowPlayingArt.style.visibility = "hidden";
-      }
-    } else {
-      const item = playbackData.item;
-      const artists = item.artists?.map((a) => a.name).join(", ") || "Unknown Artist";
-      const image =
-        item.album?.images?.[0]?.url ||
-        item.album?.images?.[1]?.url ||
-        item.album?.images?.[2]?.url ||
-        "";
-
-      el.nowPlaying.textContent = `${artists} — ${item.name}`;
-      el.nowPlayingMeta.textContent =
-        `${item.album?.name || "Unknown Album"} | ${msToMinSec(item.duration_ms)}`;
-
-      if (el.nowPlayingArt) {
-        el.nowPlayingArt.src = image;
-        el.nowPlayingArt.alt = `${item.name} cover art`;
-        el.nowPlayingArt.style.visibility = image ? "visible" : "hidden";
-      }
+      resetNowPlayingUI();
+      renderSpotifyQueue(queueData);
+      stopLocalProgressTimer();
+      return;
     }
 
+    const item = playbackData.item;
+    const artists = item.artists?.map((a) => a.name).join(", ") || "Unknown Artist";
+    const image =
+      item.album?.images?.[0]?.url ||
+      item.album?.images?.[1]?.url ||
+      item.album?.images?.[2]?.url ||
+      "";
+
+    currentPlaybackProgressMs = Number(playbackData.progress_ms || 0);
+    currentPlaybackDurationMs = Number(item.duration_ms || 0);
+
+    el.nowPlaying.textContent = `${artists} — ${item.name}`;
+    el.nowPlayingMeta.textContent =
+      `${item.album?.name || "Unknown Album"} | ${msToMinSec(item.duration_ms)}`;
+
+    if (el.nowPlayingArt) {
+      el.nowPlayingArt.src = image;
+      el.nowPlayingArt.alt = `${item.name} cover art`;
+      el.nowPlayingArt.style.visibility = image ? "visible" : "hidden";
+    }
+
+    updatePlaybackProgressUI(currentPlaybackProgressMs, currentPlaybackDurationMs);
+    updatePlaybackStateLabel();
     renderSpotifyQueue(queueData);
+
+    if (isPlaybackActive) {
+      startLocalProgressTimer();
+    } else {
+      stopLocalProgressTimer();
+    }
   } catch (error) {
-    el.nowPlaying.textContent = "Nothing currently loaded";
-    el.nowPlayingMeta.textContent = error?.message || "Playback unavailable";
+    currentNowPlayingTrack = null;
+    currentSpotifyQueueTracks = [];
+    currentPlaybackProgressMs = 0;
+    currentPlaybackDurationMs = 0;
+    isPlaybackActive = false;
+
+    if (el.nowPlaying) el.nowPlaying.textContent = "Nothing currently loaded";
+    if (el.nowPlayingMeta) {
+      el.nowPlayingMeta.textContent = error?.message || "Playback unavailable";
+    }
 
     if (el.nowPlayingArt) {
       el.nowPlayingArt.src = "";
       el.nowPlayingArt.style.visibility = "hidden";
     }
 
+    updatePlaybackProgressUI(0, 0);
+    updatePlaybackStateLabel();
     renderSpotifyQueue(null);
+    stopLocalProgressTimer();
   }
 }
 
@@ -1515,7 +1885,7 @@ async function runManualTrackSearch() {
     return;
   }
 
-  setStatus(`Searching Spotify for \"${query}\"...`);
+  setStatus(`Searching Spotify for "${query}"...`);
 
   const tracks = await searchSpotifyTracks(query);
   manualSearchResults = tracks;
@@ -1596,7 +1966,11 @@ function openModerationPanel() {
 function closeModerationPanel() {
   document.getElementById("modOverlay")?.classList.remove("mod-is-open");
   document.getElementById("modBackdrop")?.classList.remove("mod-is-open");
-  document.body.classList.remove("mod-panel-open");
+
+  const lyricsOpen = el.lyricsModal?.classList.contains("lyrics-is-open");
+  if (!lyricsOpen) {
+    document.body.classList.remove("mod-panel-open");
+  }
 }
 
 // ======================================================
@@ -1687,7 +2061,6 @@ function wireStaticEvents() {
 
   el.manualSearchInput?.addEventListener("keydown", async (event) => {
     if (event.key !== "Enter") return;
-
     event.preventDefault();
 
     try {
@@ -1751,13 +2124,97 @@ function wireStaticEvents() {
   });
 
   el.btnOpenModeration?.addEventListener("click", () => openModerationPanel());
-
   document.getElementById("btnCloseModeration")?.addEventListener("click", () => closeModerationPanel());
-
   document.getElementById("modBackdrop")?.addEventListener("click", () => closeModerationPanel());
 
+  el.btnNowPlayingLyrics?.addEventListener("click", () => {
+    if (!currentNowPlayingTrack) {
+      setStatus("No active track is currently playing.");
+      return;
+    }
+
+    const artist = (currentNowPlayingTrack.artists || []).map((a) => a.name).join(", ");
+    const title = currentNowPlayingTrack.name || "Unknown Song";
+    const url = buildGeniusUrl(artist, title);
+
+    openLyricsModal({
+      url,
+      songId: getGeniusSongIdFromUrl(url),
+      title,
+      artist
+    });
+  });
+
+  el.btnCloseLyrics?.addEventListener("click", () => {
+    closeLyricsModal();
+  });
+
+  el.lyricsBackdrop?.addEventListener("click", () => {
+    closeLyricsModal();
+  });
+
+  document.addEventListener("click", (event) => {
+    const lyricsButton = event.target.closest(".lyrics-popup-btn");
+    if (!lyricsButton) return;
+
+    openLyricsModal({
+      url: lyricsButton.dataset.geniusUrl || "",
+      songId: lyricsButton.dataset.geniusSongId || "",
+      title: lyricsButton.dataset.title || "Lyrics Preview",
+      artist: lyricsButton.dataset.artist || "Unknown Artist"
+    });
+  });
+
+  el.btnPrevTrack?.addEventListener("click", async () => {
+    try {
+      setTransportBusy(true);
+      await skipToPreviousTrack();
+      setStatus("Skipped to previous track.");
+      await wait(500);
+      await refreshPlayback();
+    } catch (error) {
+      console.error(error);
+      setStatus(error?.message || "Could not go to previous track.");
+    } finally {
+      setTransportBusy(false);
+    }
+  });
+
+  el.btnPlayPause?.addEventListener("click", async () => {
+    try {
+      setTransportBusy(true);
+      await togglePlayPause();
+      await wait(350);
+      await refreshPlayback();
+      setStatus(isPlaybackActive ? "Playback resumed." : "Playback paused.");
+    } catch (error) {
+      console.error(error);
+      setStatus(error?.message || "Could not toggle playback.");
+    } finally {
+      setTransportBusy(false);
+    }
+  });
+
+  el.btnNextTrack?.addEventListener("click", async () => {
+    try {
+      setTransportBusy(true);
+      await skipToNextTrack();
+      setStatus("Skipped to next track.");
+      await wait(500);
+      await refreshPlayback();
+    } catch (error) {
+      console.error(error);
+      setStatus(error?.message || "Could not go to next track.");
+    } finally {
+      setTransportBusy(false);
+    }
+  });
+
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeModerationPanel();
+    if (e.key === "Escape") {
+      closeModerationPanel();
+      closeLyricsModal();
+    }
   });
 }
 
@@ -1790,8 +2247,11 @@ async function init() {
   ensureStorageDefaults();
   wireStaticEvents();
   renderApprovedQueue();
+  renderApprovedPreview();
   renderManualSearchResults();
   buildRequestSummary([]);
+  resetNowPlayingUI();
+
   await handleSpotifyCallback();
 
   let hasActiveSpotifyLogin = false;
@@ -1799,6 +2259,7 @@ async function init() {
   try {
     const me = await getCurrentUserProfile();
     hasActiveSpotifyLogin = true;
+
     if (me?.display_name) {
       setStatus(`Ready. Logged in as ${me.display_name}.`);
     } else {
