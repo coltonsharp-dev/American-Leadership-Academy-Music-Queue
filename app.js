@@ -444,10 +444,89 @@ function clearLyricsEmbed() {
   activeLyricsScript = null;
 
   if (el.lyricsEmbedMount) {
-    el.lyricsEmbedMount.innerHTML = `
-      <div class="lyrics-loading">Preparing lyrics preview...</div>
-    `;
+    el.lyricsEmbedMount.innerHTML = "";
   }
+}
+
+function renderLyricsFallback(url, title, artist, reason = "") {
+  if (!el.lyricsEmbedMount) return;
+
+  el.lyricsEmbedMount.innerHTML = `
+    <div class="lyrics-fallback">
+      <div class="lyrics-fallback-title">${escapeHtml(title || "Lyrics unavailable")}</div>
+      <div class="lyrics-fallback-copy">
+        The Genius embed could not be rendered inside the popup.
+        ${reason ? `<br><br><strong>Debug:</strong> ${escapeHtml(reason)}` : ""}
+      </div>
+      <div class="request-meta">${escapeHtml(artist || "Unknown artist")}</div>
+      ${
+        url
+          ? `<a class="btn btn-small btn-lyrics-action" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">Open Full Lyrics</a>`
+          : ""
+      }
+    </div>
+  `;
+}
+
+function renderGeniusEmbed(songId, url, title, artist) {
+  clearLyricsEmbed();
+
+  if (!songId) {
+    renderLyricsFallback(url, title, artist, "No mapped Genius song ID was found.");
+    return;
+  }
+
+  if (!el.lyricsEmbedMount) return;
+
+  const mountId = `rg_embed_link_${songId}_${Date.now()}`;
+
+  el.lyricsEmbedMount.innerHTML = `
+    <div class="lyrics-loading">Loading Genius embed...</div>
+    <div
+      id="${mountId}"
+      class="rg_embed_link"
+      data-song-id="${escapeHtml(songId)}"
+      style="margin-top:12px;color:#f4f7fb;"
+    >
+      Read <a href="${escapeHtml(url || "#")}" target="_blank" rel="noopener noreferrer">
+        ${escapeHtml(title || "this song")}
+      </a> on Genius
+    </div>
+  `;
+
+  const script = document.createElement("script");
+  script.src = `https://genius.com/songs/${encodeURIComponent(songId)}/embed.js`;
+  script.async = true;
+  script.crossOrigin = "anonymous";
+
+  script.onload = () => {
+    const loadingNode = el.lyricsEmbedMount?.querySelector(".lyrics-loading");
+    if (loadingNode) loadingNode.remove();
+
+    window.setTimeout(() => {
+      const stillHasRawLink = el.lyricsEmbedMount?.querySelector(`#${CSS.escape(mountId)}.rg_embed_link`);
+      if (stillHasRawLink) {
+        renderLyricsFallback(
+          url,
+          title,
+          artist,
+          `Embed script loaded but Genius did not transform the container for song ID ${songId}.`
+        );
+      }
+    }, 1800);
+  };
+
+  script.onerror = () => {
+    renderLyricsFallback(
+      url,
+      title,
+      artist,
+      `Script failed to load for Genius song ID ${songId}.`
+    );
+  };
+
+  activeLyricsScript = script;
+  document.body.appendChild(script);
 }
 
 function openLyricsModalShell(title, meta, url) {
