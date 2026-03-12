@@ -1,13 +1,13 @@
 // ======================================================
 // ALA Music Queue Dashboard
-// Polished single-file app.js
+// Cleaned + fixed single-file app.js
 // - Spotify PKCE login
 // - Live playback preview
 // - Previous / Play-Pause / Next transport
 // - Time progress + remaining
 // - Google Sheet request moderation
 // - Approved queue flow
-// - Genius lyrics popup with official embed support
+// - Genius lyrics popup with stronger embed handling
 // ======================================================
 
 // --------------------
@@ -31,7 +31,8 @@ const CONFIG = {
   trackLookupConcurrency: 5,
   trackLookupRetryCount: 2,
   trackLookupRetryDelayMs: 500,
-  manualSearchLimit: 8
+  manualSearchLimit: 8,
+  geniusTransformWaitMs: 2200
 };
 
 // --------------------
@@ -112,7 +113,9 @@ let currentSpotifyQueueTracks = [];
 let currentPlaybackProgressMs = 0;
 let currentPlaybackDurationMs = 0;
 let isPlaybackActive = false;
+
 let activeLyricsScript = null;
+let activeLyricsRequestToken = 0;
 
 // --------------------
 // GENIUS OVERRIDES
@@ -438,8 +441,14 @@ function buildGeniusUrl(artist, song) {
 }
 
 function clearLyricsEmbed() {
-  if (activeLyricsScript && activeLyricsScript.parentNode) {
-    activeLyricsScript.parentNode.removeChild(activeLyricsScript);
+  activeLyricsRequestToken += 1;
+
+  if (activeLyricsScript) {
+    activeLyricsScript.onload = null;
+    activeLyricsScript.onerror = null;
+    if (activeLyricsScript.parentNode) {
+      activeLyricsScript.parentNode.removeChild(activeLyricsScript);
+    }
   }
   activeLyricsScript = null;
 
@@ -478,6 +487,7 @@ function renderGeniusEmbed(songId, url, title, artist) {
 
   if (!el.lyricsEmbedMount) return;
 
+  const requestToken = activeLyricsRequestToken;
   const mountId = `rg_embed_link_${songId}_${Date.now()}`;
 
   el.lyricsEmbedMount.innerHTML = `
@@ -488,9 +498,11 @@ function renderGeniusEmbed(songId, url, title, artist) {
       data-song-id="${escapeHtml(songId)}"
       style="margin-top:12px;color:#f4f7fb;"
     >
-      Read <a href="${escapeHtml(url || "#")}" target="_blank" rel="noopener noreferrer">
+      Read
+      <a href="${escapeHtml(url || "#")}" target="_blank" rel="noopener noreferrer">
         ${escapeHtml(title || "this song")}
-      </a> on Genius
+      </a>
+      on Genius
     </div>
   `;
 
@@ -500,12 +512,17 @@ function renderGeniusEmbed(songId, url, title, artist) {
   script.crossOrigin = "anonymous";
 
   script.onload = () => {
-    const loadingNode = el.lyricsEmbedMount?.querySelector(".lyrics-loading");
-    if (loadingNode) loadingNode.remove();
+    if (requestToken !== activeLyricsRequestToken) return;
 
     window.setTimeout(() => {
-      const stillHasRawLink = el.lyricsEmbedMount?.querySelector(`#${CSS.escape(mountId)}.rg_embed_link`);
-      if (stillHasRawLink) {
+      if (requestToken !== activeLyricsRequestToken) return;
+      if (!el.lyricsEmbedMount) return;
+
+      const loadingNode = el.lyricsEmbedMount.querySelector(".lyrics-loading");
+      if (loadingNode) loadingNode.remove();
+
+      const rawContainer = document.getElementById(mountId);
+      if (rawContainer) {
         renderLyricsFallback(
           url,
           title,
@@ -513,10 +530,11 @@ function renderGeniusEmbed(songId, url, title, artist) {
           `Embed script loaded but Genius did not transform the container for song ID ${songId}.`
         );
       }
-    }, 1800);
+    }, CONFIG.geniusTransformWaitMs);
   };
 
   script.onerror = () => {
+    if (requestToken !== activeLyricsRequestToken) return;
     renderLyricsFallback(
       url,
       title,
@@ -545,6 +563,7 @@ function openLyricsModalShell(title, meta, url) {
 }
 
 function closeLyricsModal() {
+  clearLyricsEmbed();
   el.lyricsBackdrop?.classList.remove("lyrics-is-open");
   el.lyricsModal?.classList.remove("lyrics-is-open");
 
@@ -552,57 +571,6 @@ function closeLyricsModal() {
   if (!modOpen) {
     document.body.classList.remove("mod-panel-open");
   }
-}
-
-function renderLyricsFallback(url, title, artist) {
-  if (!el.lyricsEmbedMount) return;
-
-  el.lyricsEmbedMount.innerHTML = `
-    <div class="lyrics-fallback">
-      <div class="lyrics-fallback-title">${escapeHtml(title || "Lyrics unavailable")}</div>
-      <div class="lyrics-fallback-copy">
-        The Genius popup is open, but this track does not yet have a mapped Genius song ID inside the dashboard.
-        Add the song URL and Genius ID to the local override map to render the official embed here.
-      </div>
-      <div class="request-meta">${escapeHtml(artist || "Unknown artist")}</div>
-      ${
-        url
-          ? `<a class="btn btn-small btn-lyrics-action" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">Open Full Lyrics</a>`
-          : ""
-      }
-    </div>
-  `;
-}
-
-function renderGeniusEmbed(songId, url, title, artist) {
-  clearLyricsEmbed();
-
-  if (!songId) {
-    renderLyricsFallback(url, title, artist);
-    return;
-  }
-
-  const embedId = `rg_embed_link_${songId}_${Date.now()}`;
-
-  if (el.lyricsEmbedMount) {
-    el.lyricsEmbedMount.innerHTML = `
-      <div
-        id="${embedId}"
-        class="rg_embed_link"
-        data-song-id="${escapeHtml(songId)}"
-        style="color:#f4f7fb;"
-      >
-        Read <a href="${escapeHtml(url || "#")}" target="_blank" rel="noopener noreferrer">${escapeHtml(title || "this song")}</a> on Genius
-      </div>
-    `;
-  }
-
-  const script = document.createElement("script");
-  script.src = `https://genius.com/songs/${encodeURIComponent(songId)}/embed.js`;
-  script.crossOrigin = "anonymous";
-  script.async = true;
-  activeLyricsScript = script;
-  document.body.appendChild(script);
 }
 
 function openLyricsModal(payload = {}) {
