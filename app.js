@@ -227,10 +227,14 @@ function updatePlaybackStateLabel() {
 
   if (!currentNowPlayingTrack) {
     el.playbackStateLabel.textContent = "No Active Song";
+    if (el.btnPlayPause) el.btnPlayPause.textContent = "▶︎";
     return;
   }
 
   el.playbackStateLabel.textContent = isPlaybackActive ? "Playing" : "Paused";
+  if (el.btnPlayPause) {
+    el.btnPlayPause.textContent = isPlaybackActive ? "❚❚" : "▶︎";
+  }
 }
 
 function setTransportBusy(isBusy) {
