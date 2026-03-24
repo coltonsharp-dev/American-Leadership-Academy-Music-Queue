@@ -236,13 +236,13 @@ function updatePlaybackStateLabel() {
 
   if (!currentNowPlayingTrack) {
     el.playbackStateLabel.textContent = "No Active Song";
-    if (el.playPauseIcon) el.playPauseIcon.textContent = "▶";
+    if (el.playPauseIcon) el.playPauseIcon.textContent = "▶︎";
     return;
   }
 
   el.playbackStateLabel.textContent = isPlaybackActive ? "Playing" : "Paused";
   if (el.playPauseIcon) {
-    el.playPauseIcon.textContent = isPlaybackActive ? "❚❚" : "▶";
+    el.playPauseIcon.textContent = isPlaybackActive ? "⏸︎" : "▶︎";
   }
 }
 

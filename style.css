@@ -719,6 +719,13 @@ button:disabled,
   background: linear-gradient(180deg, #42ffa0 0%, #1ed677 100%);
 }
 
+.control-button span,
+.play-pause-button span {
+  font-family: "Segoe UI Symbol", "Noto Sans Symbols 2", "Noto Sans Symbols", sans-serif;
+  font-variant-emoji: text;
+  line-height: 1;
+}
+
 .progress-container {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
