@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
     rel="stylesheet"
   />
 
@@ -25,24 +25,33 @@
 
         <div class="hero-top">
           <div class="hero-copy">
+            <div class="school-brand">
+              <img
+                class="school-logo"
+                src="https://raw.githubusercontent.com/NBaker9262/Noah-ALA-File-Hosting/refs/heads/main/Images/ALA%20Bear%20No%20BG.png"
+                alt="American Leadership Academy bear logo"
+                loading="lazy"
+              />
+            </div>
             <p class="eyebrow">American Leadership Academy</p>
-            <h1>Music Queue Dashboard</h1>
-            <p class="hero-sub">
-              Review student song requests, approve clean tracks, monitor live playback,
-              preview lyrics, control transport, and send approved songs to the Spotify queue
-              while playback runs in another Spotify window or app.
-            </p>
+            <h1>Music Queue</h1>
           </div>
 
           <div class="hero-actions">
             <button id="btnLogin" class="btn btn-primary" type="button">
-              Login to Spotify
+              Login
             </button>
             <button id="btnLogout" class="btn" type="button">
               Logout
             </button>
             <button id="btnStartDefaultPlaylist" class="btn btn-primary" type="button">
-              Start Default Playlist
+              Start Main Playlist
+            </button>
+            <button id="btnStartSlowPlaylist" class="btn btn-secondary" type="button">
+              Start Slow Playlist
+            </button>
+            <button id="btnStartFunPlaylist" class="btn btn-secondary" type="button">
+              Start Fun Playlist
             </button>
             <button id="btnOpenModeration" class="btn btn-moderation" type="button">
               Moderation Panel
@@ -59,76 +68,83 @@
 
         <div class="section-heading">
           <div>
-            <p class="section-kicker">Live Playback Preview</p>
+            <p class="section-kicker">Player Controls</p>
             <h2>Now Playing</h2>
           </div>
 
           <div class="queue-nav">
-            <button id="btnNowPlayingLyrics" class="btn btn-small btn-lyrics-action" type="button">
-              Lyrics
-            </button>
             <button id="btnRefreshPlayback" class="btn btn-small" type="button">
               Refresh
+            </button>
+            <button id="btnNowPlayingLyrics" class="btn btn-small btn-lyrics-action" type="button">
+              Lyrics
             </button>
           </div>
         </div>
 
         <div class="playback-bento-grid">
-          <div class="media-card media-card-large media-card-3d">
-            <img
-              id="nowPlayingArt"
-              class="media-art large"
-              src=""
-              alt="Now playing artwork"
-            />
-            <div class="media-copy">
-              <div id="nowPlaying" class="media-title">Nothing currently loaded</div>
-              <div id="nowPlayingMeta" class="media-meta">
-                Waiting for playback data...
-              </div>
-
-              <div class="playback-time-wrap">
-                <div class="playback-time-row">
-                  <span class="time-label">Progress</span>
-                  <span id="nowPlayingProgressText" class="time-value">0:00</span>
-                </div>
-                <div class="playback-time-row">
-                  <span class="time-label">Remaining</span>
-                  <span id="nowPlayingRemaining" class="time-value">--:--</span>
-                </div>
-                <div class="playback-progress-shell">
-                  <div id="nowPlayingProgressBar" class="playback-progress-bar"></div>
-                </div>
+          <div class="player-controls-shell">
+            <div class="control-track-info">
+              <img
+                id="nowPlayingArt"
+                class="control-cover control-cover-featured"
+                src=""
+                alt="Current track artwork"
+              />
+              <div class="control-track-copy">
+                <p id="nowPlaying" class="control-title">Nothing currently loaded</p>
+                <p id="nowPlayingMeta" class="control-artist">Waiting for playback data...</p>
               </div>
             </div>
-          </div>
 
-          <div class="transport-card">
-            <div class="transport-card-head">
-              <p class="section-kicker">Playback Controls</p>
-              <h3 class="transport-title">Live Transport</h3>
-            </div>
-
-            <div class="transport-controls">
-              <button id="btnPrevTrack" class="btn transport-btn" type="button" aria-label="Previous track">
-                ⏮︎
-              </button>
-              <button id="btnPlayPause" class="btn btn-primary transport-btn transport-btn-main" type="button" aria-label="Play or pause">
-                ▶︎
-              </button>
-              <button id="btnNextTrack" class="btn transport-btn" type="button" aria-label="Next track">
-                ⏭︎
-              </button>
-            </div>
-
-            <div class="transport-meta">
-              <div class="transport-chip">
-                <span class="chip-label">Live</span>
-                <span class="chip-value" id="playbackStateLabel">Playback Ready</span>
+            <div class="playback-controls-panel">
+              <div class="playback-buttons">
+                <button id="btnPrevTrack" class="control-button" type="button" aria-label="Previous track">
+                  <span aria-hidden="true">⏮</span>
+                </button>
+                <button id="btnPlayPause" class="play-pause-button" type="button" aria-label="Play or pause">
+                  <span id="playPauseIcon" aria-hidden="true">▶</span>
+                </button>
+                <button id="btnNextTrack" class="control-button" type="button" aria-label="Next track">
+                  <span aria-hidden="true">⏭</span>
+                </button>
               </div>
-              <div class="transport-chip">
-                <span class="chip-label">Queue</span>
-                <span class="chip-value">Spotify Connected</span>
+
+              <div class="progress-container">
+                <span id="nowPlayingProgressText" class="time-value">0:00</span>
+                <button
+                  id="nowPlayingSeekTrack"
+                  class="progress-bar"
+                  type="button"
+                  aria-label="Seek within current track"
+                >
+                  <div id="nowPlayingProgressBar" class="progress-fill"></div>
+                </button>
+                <span id="nowPlayingTotalTime" class="time-value">0:00</span>
+              </div>
+
+              <div class="transport-meta">
+                <div class="transport-chip">
+                  <span class="chip-label">Status</span>
+                  <span class="chip-value" id="playbackStateLabel">Playback Ready</span>
+                </div>
+                <div class="transport-chip">
+                  <span class="chip-label">Remaining</span>
+                  <span class="chip-value" id="nowPlayingRemaining">--:--</span>
+                </div>
+              </div>
+
+              <div class="volume-row">
+                <span class="volume-label">Volume</span>
+                <button
+                  id="nowPlayingVolumeTrack"
+                  class="volume-bar"
+                  type="button"
+                  aria-label="Set playback volume"
+                >
+                  <div id="nowPlayingVolumeBar" class="volume-fill"></div>
+                </button>
+                <span id="nowPlayingVolumeText" class="volume-percent">--%</span>
               </div>
             </div>
           </div>
@@ -141,8 +157,8 @@
 
         <div class="section-heading">
           <div>
-            <p class="section-kicker">Spotify Playback Queue</p>
-            <h2>Live Spotify Queue</h2>
+            <p class="section-kicker">Queue</p>
+            <h2>Up Next</h2>
           </div>
         </div>
 
@@ -168,6 +184,12 @@
     <div class="mod-overlay-header">
       <div class="mod-overlay-title-row">
         <div>
+          <img
+            class="school-logo school-logo-small"
+            src="https://raw.githubusercontent.com/NBaker9262/Noah-ALA-File-Hosting/refs/heads/main/Images/ALA%20Bear%20No%20BG.png"
+            alt="ALA logo"
+            loading="lazy"
+          />
           <p class="eyebrow">American Leadership Academy</p>
           <h2>Moderation Panel</h2>
         </div>
@@ -203,14 +225,13 @@
       <section class="card search-card mod-top-search-card neon-card">
         <div class="section-heading">
           <div>
-            <p class="section-kicker">Moderator Override</p>
-            <h2>Search Spotify and Add Exact Track</h2>
+            <p class="section-kicker">Moderator Search</p>
+            <h2>Find and Add a Track</h2>
           </div>
         </div>
 
         <div class="summary-text">
-          Search Spotify, verify the exact result, and add it directly to the moderator queue.
-          Moderator adds can override the normal clean-only approval path.
+          Search Spotify and add an exact song directly to the moderator queue.
         </div>
 
         <div class="search-controls">
@@ -240,7 +261,7 @@
           <div class="section-heading">
             <div>
               <p class="section-kicker">Moderation</p>
-              <h2>Unapproved Student Requests</h2>
+              <h2>Student Requests</h2>
             </div>
           </div>
 
@@ -306,48 +327,6 @@
           </section>
 
         </div>
-      </div>
-    </div>
-  </aside>
-
-  <!-- LYRICS POPUP -->
-  <div id="lyricsBackdrop" class="lyrics-backdrop"></div>
-
-  <aside
-    id="lyricsModal"
-    class="lyrics-modal"
-    role="dialog"
-    aria-modal="true"
-    aria-label="Lyrics Popup"
-  >
-    <div class="lyrics-modal-header">
-      <div>
-        <p class="eyebrow">Live Lyrics</p>
-        <h2 id="lyricsModalTitle">Lyrics Preview</h2>
-        <p id="lyricsModalMeta" class="lyrics-modal-meta">
-          Waiting for track selection...
-        </p>
-      </div>
-
-      <div class="lyrics-modal-actions">
-        <a
-          id="lyricsModalOpenLink"
-          class="btn btn-small btn-lyrics-action"
-          href="#"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Open Full Lyrics
-        </a>
-        <button id="btnCloseLyrics" class="btn lyrics-close-btn" type="button">
-          &#x2715; Close
-        </button>
-      </div>
-    </div>
-
-    <div class="lyrics-modal-body">
-      <div id="lyricsEmbedMount" class="lyrics-embed-mount">
-        <div class="empty-state">Choose a song to preview lyrics.</div>
       </div>
     </div>
   </aside>

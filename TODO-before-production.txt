@@ -1,0 +1,31 @@
+ALA Music Queue - Before Production Checklist
+
+1. Replace placeholder playlist IDs in app.js:
+   - CONFIG.slowPlaylistId
+   - CONFIG.funPlaylistId
+   (currently using the same filler ID as defaultPlaylistId)
+
+2. Confirm final Spotify playlists for:
+   - Default playlist
+   - Slow playlist
+   - Fun playlist
+
+3. Host school logo locally (or approved CDN) and update image URLs in index.html.
+
+4. Validate color contrast accessibility for all button states and text over gradients.
+
+5. Run a full mobile and desktop visual QA pass for all dashboard and moderation views.
+
+6. Verify Spotify control behavior on the exact production device setup (active device, playback handoff, queue actions).
+
+7. Confirm Google Sheet column names are stable and document fallback mapping assumptions.
+
+8. Add regression testing checklist for:
+   - Login/logout
+   - Load requests
+   - Approve/reject/undo
+   - Add to queue
+   - Playback controls
+   - Lyrics modal
+
+9. Remove temporary/filler copy if product wording changes before launch.

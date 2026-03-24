@@ -17,6 +17,8 @@ const CONFIG = {
   clientId: "cbfd828db1414a2183039d01ceeaf181",
   redirectUriFallback: "https://coltonsharp-dev.github.io/American-Leadership-Academy-Music-Queue/",
   defaultPlaylistId: "3dcGJ6miJHVxZkQEIwGog5",
+  slowPlaylistId: "3dcGJ6miJHVxZkQEIwGog5",
+  funPlaylistId: "3dcGJ6miJHVxZkQEIwGog5",
   requestsCsvUrl:
     "https://docs.google.com/spreadsheets/d/e/2PACX-1vQyc3RRDmjc-nN-XgMMDocbnn1tlxue5ynNoNnYSxnRKxgp2LRGNmYZXnVgAFLH7IViwTAtmIAkvDsK/pub?output=csv",
   scopes: [
@@ -31,8 +33,7 @@ const CONFIG = {
   trackLookupConcurrency: 5,
   trackLookupRetryCount: 2,
   trackLookupRetryDelayMs: 500,
-  manualSearchLimit: 8,
-  geniusTransformWaitMs: 2200
+  manualSearchLimit: 8
 };
 
 // --------------------
@@ -60,6 +61,8 @@ const el = {
   btnPrevQueue: document.getElementById("btnPrevQueue"),
   btnNextQueue: document.getElementById("btnNextQueue"),
   btnStartDefaultPlaylist: document.getElementById("btnStartDefaultPlaylist"),
+  btnStartSlowPlaylist: document.getElementById("btnStartSlowPlaylist"),
+  btnStartFunPlaylist: document.getElementById("btnStartFunPlaylist"),
   btnAddApprovedToQueue: document.getElementById("btnAddApprovedToQueue"),
   btnApproveAllCleanVisible: document.getElementById("btnApproveAllCleanVisible"),
   btnRemoveAllApproved: document.getElementById("btnRemoveAllApproved"),
@@ -67,10 +70,10 @@ const el = {
   btnOpenModeration: document.getElementById("btnOpenModeration"),
   btnSearchSongs: document.getElementById("btnSearchSongs"),
   btnNowPlayingLyrics: document.getElementById("btnNowPlayingLyrics"),
-  btnCloseLyrics: document.getElementById("btnCloseLyrics"),
   btnPrevTrack: document.getElementById("btnPrevTrack"),
   btnPlayPause: document.getElementById("btnPlayPause"),
   btnNextTrack: document.getElementById("btnNextTrack"),
+  playPauseIcon: document.getElementById("playPauseIcon"),
 
   status: document.getElementById("status"),
   nowPlaying: document.getElementById("nowPlaying"),
@@ -78,7 +81,12 @@ const el = {
   nowPlayingArt: document.getElementById("nowPlayingArt"),
   nowPlayingProgressText: document.getElementById("nowPlayingProgressText"),
   nowPlayingRemaining: document.getElementById("nowPlayingRemaining"),
+  nowPlayingTotalTime: document.getElementById("nowPlayingTotalTime"),
   nowPlayingProgressBar: document.getElementById("nowPlayingProgressBar"),
+  nowPlayingSeekTrack: document.getElementById("nowPlayingSeekTrack"),
+  nowPlayingVolumeTrack: document.getElementById("nowPlayingVolumeTrack"),
+  nowPlayingVolumeBar: document.getElementById("nowPlayingVolumeBar"),
+  nowPlayingVolumeText: document.getElementById("nowPlayingVolumeText"),
   playbackStateLabel: document.getElementById("playbackStateLabel"),
 
   hideExplicitOnly: document.getElementById("hideExplicitOnly"),
@@ -88,14 +96,7 @@ const el = {
   approvedPreviewTable: document.getElementById("approvedPreviewTable"),
   spotifyQueueList: document.getElementById("spotifyQueueList"),
   manualSearchInput: document.getElementById("manualSearchInput"),
-  manualSearchResults: document.getElementById("manualSearchResults"),
-
-  lyricsBackdrop: document.getElementById("lyricsBackdrop"),
-  lyricsModal: document.getElementById("lyricsModal"),
-  lyricsModalTitle: document.getElementById("lyricsModalTitle"),
-  lyricsModalMeta: document.getElementById("lyricsModalMeta"),
-  lyricsModalOpenLink: document.getElementById("lyricsModalOpenLink"),
-  lyricsEmbedMount: document.getElementById("lyricsEmbedMount")
+  manualSearchResults: document.getElementById("manualSearchResults")
 };
 
 // --------------------
@@ -113,16 +114,7 @@ let currentSpotifyQueueTracks = [];
 let currentPlaybackProgressMs = 0;
 let currentPlaybackDurationMs = 0;
 let isPlaybackActive = false;
-
-let activeLyricsScript = null;
-let activeLyricsRequestToken = 0;
-
-// --------------------
-// GENIUS OVERRIDES
-// --------------------
-const GENIUS_ID_OVERRIDES = {
-  "https://genius.com/corinne-bailey-rae-put-your-records-on-lyrics": "181231"
-};
+let currentVolumePercent = 0;
 
 // ======================================================
 // BASIC HELPERS
@@ -216,9 +208,26 @@ function updatePlaybackProgressUI(progressMs, durationMs) {
     el.nowPlayingRemaining.textContent = `-${msToMinSec(remaining)}`;
   }
 
+  if (el.nowPlayingTotalTime) {
+    el.nowPlayingTotalTime.textContent = msToMinSec(durationMs);
+  }
+
   if (el.nowPlayingProgressBar) {
     const pct = durationMs > 0 ? Math.min(100, Math.max(0, (progressMs / durationMs) * 100)) : 0;
     el.nowPlayingProgressBar.style.width = `${pct}%`;
+  }
+}
+
+function updateVolumeUI(volumePercent) {
+  const safeVolume = Number.isFinite(volumePercent) ? Math.max(0, Math.min(100, volumePercent)) : 0;
+  currentVolumePercent = safeVolume;
+
+  if (el.nowPlayingVolumeBar) {
+    el.nowPlayingVolumeBar.style.width = `${safeVolume}%`;
+  }
+
+  if (el.nowPlayingVolumeText) {
+    el.nowPlayingVolumeText.textContent = `${Math.round(safeVolume)}%`;
   }
 }
 
@@ -227,13 +236,13 @@ function updatePlaybackStateLabel() {
 
   if (!currentNowPlayingTrack) {
     el.playbackStateLabel.textContent = "No Active Song";
-    if (el.btnPlayPause) el.btnPlayPause.textContent = "▶︎";
+    if (el.playPauseIcon) el.playPauseIcon.textContent = "▶";
     return;
   }
 
   el.playbackStateLabel.textContent = isPlaybackActive ? "Playing" : "Paused";
-  if (el.btnPlayPause) {
-    el.btnPlayPause.textContent = isPlaybackActive ? "❚❚" : "▶︎";
+  if (el.playPauseIcon) {
+    el.playPauseIcon.textContent = isPlaybackActive ? "❚❚" : "▶";
   }
 }
 
@@ -417,189 +426,39 @@ function extractSpotifyTrackId(url) {
 }
 
 // ======================================================
-// GENIUS HELPERS
+// LYRICS HELPERS (MUSIXMATCH)
 // ======================================================
-function normalizeGeniusUrl(url) {
-  return String(url || "")
-    .trim()
-    .replace(/^http:/i, "https:")
-    .replace(/\/+$/, "")
-    .toLowerCase();
+function getGeniusSongIdFromUrl() {
+  return "";
 }
 
-function getGeniusSongIdFromUrl(url) {
-  const normalized = normalizeGeniusUrl(url);
-  return GENIUS_ID_OVERRIDES[normalized] || "";
+function buildMusixmatchUrl(artist, song) {
+  const slugify = (str) =>
+    String(str || "")
+      .trim()
+      .replace(/[,&/+]+/g, " ")
+      .replace(/[^\p{L}\p{N}\s-]/gu, "")
+      .replace(/\s+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "");
+
+  const artistSlug = slugify(artist) || "Unknown-Artist";
+  const songSlug = slugify(song) || "Unknown-Song";
+
+  return `https://www.musixmatch.com/lyrics/${artistSlug}/${songSlug}`;
 }
 
 function buildGeniusUrl(artist, song) {
-  const slugify = (str) =>
-    String(str || "")
-      .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, "")
-      .trim()
-      .replace(/\s+/g, "-");
-
-  const primaryArtist = String(artist || "").split(/,|&/)[0].trim();
-  return `https://genius.com/${slugify(primaryArtist)}-${slugify(song)}-lyrics`;
+  return buildMusixmatchUrl(artist, song);
 }
 
-function clearLyricsEmbed() {
-  activeLyricsRequestToken += 1;
-
-  if (activeLyricsScript) {
-    activeLyricsScript.onload = null;
-    activeLyricsScript.onerror = null;
-    if (activeLyricsScript.parentNode) {
-      activeLyricsScript.parentNode.removeChild(activeLyricsScript);
-    }
-  }
-  activeLyricsScript = null;
-
-  if (el.lyricsEmbedMount) {
-    el.lyricsEmbedMount.innerHTML = "";
-  }
-}
-
-function renderLyricsFallback(url, title, artist, reason = "") {
-  if (!el.lyricsEmbedMount) return;
-
-  el.lyricsEmbedMount.innerHTML = `
-    <div class="lyrics-fallback">
-      <div class="lyrics-fallback-title">${escapeHtml(title || "Lyrics unavailable")}</div>
-      <div class="lyrics-fallback-copy">
-        The Genius embed could not be rendered inside the popup.
-        ${reason ? `<br><br><strong>Debug:</strong> ${escapeHtml(reason)}` : ""}
-      </div>
-      <div class="request-meta">${escapeHtml(artist || "Unknown artist")}</div>
-      ${
-        url
-          ? `<a class="btn btn-small btn-lyrics-action" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">Open Full Lyrics</a>`
-          : ""
-      }
-    </div>
-  `;
-}
-
-function renderGeniusEmbed(songId, url, title, artist) {
-  clearLyricsEmbed();
-
-  if (!songId) {
-    renderLyricsFallback(url, title, artist, "No mapped Genius song ID was found.");
-    return;
-  }
-
-  if (!el.lyricsEmbedMount) return;
-
-  const requestToken = activeLyricsRequestToken;
-  const mountId = `rg_embed_link_${songId}_${Date.now()}`;
-
-  el.lyricsEmbedMount.innerHTML = `
-    <div class="lyrics-loading">Loading Genius embed...</div>
-    <div
-      id="${mountId}"
-      class="rg_embed_link"
-      data-song-id="${escapeHtml(songId)}"
-      style="margin-top:12px;color:#f4f7fb;"
-    >
-      Read
-      <a href="${escapeHtml(url || "#")}" target="_blank" rel="noopener noreferrer">
-        ${escapeHtml(title || "this song")}
-      </a>
-      on Genius
-    </div>
-  `;
-
-  const script = document.createElement("script");
-  script.src = `https://genius.com/songs/${encodeURIComponent(songId)}/embed.js`;
-  script.async = true;
-  script.crossOrigin = "anonymous";
-
-  script.onload = () => {
-    if (requestToken !== activeLyricsRequestToken) return;
-
-    window.setTimeout(() => {
-      if (requestToken !== activeLyricsRequestToken) return;
-      if (!el.lyricsEmbedMount) return;
-
-      const loadingNode = el.lyricsEmbedMount.querySelector(".lyrics-loading");
-      if (loadingNode) loadingNode.remove();
-
-      const rawContainer = document.getElementById(mountId);
-      if (rawContainer) {
-        renderLyricsFallback(
-          url,
-          title,
-          artist,
-          `Embed script loaded but Genius did not transform the container for song ID ${songId}.`
-        );
-      }
-    }, CONFIG.geniusTransformWaitMs);
-  };
-
-  script.onerror = () => {
-    if (requestToken !== activeLyricsRequestToken) return;
-    renderLyricsFallback(
-      url,
-      title,
-      artist,
-      `Script failed to load for Genius song ID ${songId}.`
-    );
-  };
-
-  activeLyricsScript = script;
-  document.body.appendChild(script);
-}
-
-function openLyricsModalShell(title, meta, url) {
-  if (el.lyricsModalTitle) el.lyricsModalTitle.textContent = title || "Lyrics Preview";
-  if (el.lyricsModalMeta) el.lyricsModalMeta.textContent = meta || "Lyrics preview";
-
-  if (el.lyricsModalOpenLink) {
-    el.lyricsModalOpenLink.href = url || "#";
-    el.lyricsModalOpenLink.style.pointerEvents = url ? "auto" : "none";
-    el.lyricsModalOpenLink.style.opacity = url ? "1" : "0.45";
-  }
-
-  el.lyricsBackdrop?.classList.add("lyrics-is-open");
-  el.lyricsModal?.classList.add("lyrics-is-open");
-  document.body.classList.add("mod-panel-open");
-}
-
-function closeLyricsModal() {
-  clearLyricsEmbed();
-  el.lyricsBackdrop?.classList.remove("lyrics-is-open");
-  el.lyricsModal?.classList.remove("lyrics-is-open");
-
-  const modOpen = document.getElementById("modOverlay")?.classList.contains("mod-is-open");
-  if (!modOpen) {
-    document.body.classList.remove("mod-panel-open");
-  }
-}
-
-function openLyricsModal(payload = {}) {
-  const url = payload.url || "";
-  const title = payload.title || "Lyrics Preview";
-  const artist = payload.artist || "Unknown Artist";
-  const songId = payload.songId || getGeniusSongIdFromUrl(url);
-  const meta = artist ? artist : "Lyrics preview";
-
-  openLyricsModalShell(title, meta, url);
-  renderGeniusEmbed(songId, url, title, artist);
-}
+function closeLyricsModal() {}
 
 function createLyricsButtonHtml({ url = "", songId = "", title = "", artist = "" } = {}) {
   return `
-    <button
-      class="ghost-btn btn-lyrics lyrics-popup-btn"
-      type="button"
-      data-genius-url="${escapeHtml(url)}"
-      data-genius-song-id="${escapeHtml(songId)}"
-      data-title="${escapeHtml(title)}"
-      data-artist="${escapeHtml(artist)}"
-    >
+    <a class="ghost-btn btn-lyrics" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">
       Lyrics
-    </button>
+    </a>
   `;
 }
 
@@ -918,7 +777,7 @@ async function getTrackById(trackId) {
 
 async function getCurrentlyPlaying() {
   try {
-    return await spotifyFetch("/me/player/currently-playing");
+    return await spotifyFetch("/me/player");
   } catch (error) {
     console.warn("Currently playing unavailable:", error);
     return null;
@@ -966,8 +825,24 @@ async function ensureActiveDevice() {
 }
 
 async function startDefaultPlaylist() {
+  return startPlaylistById(CONFIG.defaultPlaylistId);
+}
+
+async function startSlowPlaylist() {
+  return startPlaylistById(CONFIG.slowPlaylistId);
+}
+
+async function startFunPlaylist() {
+  return startPlaylistById(CONFIG.funPlaylistId);
+}
+
+async function startPlaylistById(playlistId) {
   const token = await getAccessToken();
   if (!token) throw new Error("Spotify login required.");
+
+  if (!playlistId) {
+    throw new Error("Missing playlist ID in app configuration.");
+  }
 
   const device = await ensureActiveDevice();
 
@@ -980,7 +855,7 @@ async function startDefaultPlaylist() {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        context_uri: `spotify:playlist:${CONFIG.defaultPlaylistId}`
+        context_uri: `spotify:playlist:${playlistId}`
       })
     }
   );
@@ -1052,6 +927,18 @@ async function togglePlayPause() {
   } else {
     await resumePlayback();
   }
+}
+
+async function seekPlayback(positionMs) {
+  await ensureActiveDevice();
+  const safePosition = Math.max(0, Math.floor(positionMs));
+  await spotifyNoContent(`/me/player/seek?position_ms=${safePosition}`, { method: "PUT" });
+}
+
+async function setPlaybackVolume(volumePercent) {
+  await ensureActiveDevice();
+  const safeVolume = Math.max(0, Math.min(100, Math.round(volumePercent)));
+  await spotifyNoContent(`/me/player/volume?volume_percent=${safeVolume}`, { method: "PUT" });
 }
 
 // ======================================================
@@ -1792,8 +1679,8 @@ function renderSpotifyQueue(queueData) {
 // PLAYBACK PREVIEW
 // ======================================================
 function resetNowPlayingUI() {
-  if (el.nowPlaying) el.nowPlaying.textContent = "Nothing currently loaded";
-  if (el.nowPlayingMeta) el.nowPlayingMeta.textContent = "Waiting for playback data...";
+  if (el.nowPlaying) el.nowPlaying.textContent = "No song playing";
+  if (el.nowPlayingMeta) el.nowPlayingMeta.textContent = "Start a playlist, then press Refresh.";
   if (el.nowPlayingArt) {
     el.nowPlayingArt.src = "";
     el.nowPlayingArt.style.visibility = "hidden";
@@ -1801,7 +1688,9 @@ function resetNowPlayingUI() {
 
   currentPlaybackProgressMs = 0;
   currentPlaybackDurationMs = 0;
+  currentVolumePercent = 0;
   updatePlaybackProgressUI(0, 0);
+  updateVolumeUI(0);
   updatePlaybackStateLabel();
 }
 
@@ -1817,6 +1706,7 @@ async function refreshPlayback() {
     currentNowPlayingTrack = playbackData?.item || null;
     currentSpotifyQueueTracks = Array.isArray(queueData?.queue) ? queueData.queue : [];
     isPlaybackActive = !!playbackData?.is_playing;
+    currentVolumePercent = Number(playbackData?.device?.volume_percent || 0);
 
     if (!playbackData || !playbackData.item) {
       currentNowPlayingTrack = null;
@@ -1824,6 +1714,7 @@ async function refreshPlayback() {
       currentPlaybackProgressMs = 0;
       currentPlaybackDurationMs = 0;
       isPlaybackActive = false;
+      currentVolumePercent = 0;
 
       resetNowPlayingUI();
       renderSpotifyQueue(queueData);
@@ -1842,9 +1733,9 @@ async function refreshPlayback() {
     currentPlaybackProgressMs = Number(playbackData.progress_ms || 0);
     currentPlaybackDurationMs = Number(item.duration_ms || 0);
 
-    el.nowPlaying.textContent = `${artists} — ${item.name}`;
+    el.nowPlaying.textContent = item.name || "Unknown Song";
     el.nowPlayingMeta.textContent =
-      `${item.album?.name || "Unknown Album"} | ${msToMinSec(item.duration_ms)}`;
+      `${artists} | ${item.album?.name || "Unknown Album"}`;
 
     if (el.nowPlayingArt) {
       el.nowPlayingArt.src = image;
@@ -1853,6 +1744,7 @@ async function refreshPlayback() {
     }
 
     updatePlaybackProgressUI(currentPlaybackProgressMs, currentPlaybackDurationMs);
+    updateVolumeUI(currentVolumePercent);
     updatePlaybackStateLabel();
     renderSpotifyQueue(queueData);
 
@@ -1867,8 +1759,9 @@ async function refreshPlayback() {
     currentPlaybackProgressMs = 0;
     currentPlaybackDurationMs = 0;
     isPlaybackActive = false;
+    currentVolumePercent = 0;
 
-    if (el.nowPlaying) el.nowPlaying.textContent = "Nothing currently loaded";
+    if (el.nowPlaying) el.nowPlaying.textContent = "No song playing";
     if (el.nowPlayingMeta) {
       el.nowPlayingMeta.textContent = error?.message || "Playback unavailable";
     }
@@ -1879,6 +1772,7 @@ async function refreshPlayback() {
     }
 
     updatePlaybackProgressUI(0, 0);
+    updateVolumeUI(0);
     updatePlaybackStateLabel();
     renderSpotifyQueue(null);
     stopLocalProgressTimer();
@@ -2052,7 +1946,7 @@ function wireStaticEvents() {
   el.btnRefreshPlayback?.addEventListener("click", async () => {
     try {
       await refreshPlayback();
-      setStatus("Playback refreshed.");
+      setStatus("Player refreshed.");
     } catch (error) {
       setStatus(error?.message || "Failed to refresh playback.");
     }
@@ -2061,11 +1955,33 @@ function wireStaticEvents() {
   el.btnStartDefaultPlaylist?.addEventListener("click", async () => {
     try {
       await startDefaultPlaylist();
-      setStatus("Default playlist started.");
+      setStatus("Main playlist started.");
       await refreshPlayback();
     } catch (error) {
       console.error(error);
-      setStatus(error?.message || "Could not start default playlist.");
+      setStatus(error?.message || "Could not start main playlist.");
+    }
+  });
+
+  el.btnStartSlowPlaylist?.addEventListener("click", async () => {
+    try {
+      await startSlowPlaylist();
+      setStatus("Slow playlist started.");
+      await refreshPlayback();
+    } catch (error) {
+      console.error(error);
+      setStatus(error?.message || "Could not start slow playlist.");
+    }
+  });
+
+  el.btnStartFunPlaylist?.addEventListener("click", async () => {
+    try {
+      await startFunPlaylist();
+      setStatus("Fun playlist started.");
+      await refreshPlayback();
+    } catch (error) {
+      console.error(error);
+      setStatus(error?.message || "Could not start fun playlist.");
     }
   });
 
@@ -2186,34 +2102,8 @@ function wireStaticEvents() {
 
     const artist = (currentNowPlayingTrack.artists || []).map((a) => a.name).join(", ");
     const title = currentNowPlayingTrack.name || "Unknown Song";
-    const url = buildGeniusUrl(artist, title);
-
-    openLyricsModal({
-      url,
-      songId: getGeniusSongIdFromUrl(url),
-      title,
-      artist
-    });
-  });
-
-  el.btnCloseLyrics?.addEventListener("click", () => {
-    closeLyricsModal();
-  });
-
-  el.lyricsBackdrop?.addEventListener("click", () => {
-    closeLyricsModal();
-  });
-
-  document.addEventListener("click", (event) => {
-    const lyricsButton = event.target.closest(".lyrics-popup-btn");
-    if (!lyricsButton) return;
-
-    openLyricsModal({
-      url: lyricsButton.dataset.geniusUrl || "",
-      songId: lyricsButton.dataset.geniusSongId || "",
-      title: lyricsButton.dataset.title || "Lyrics Preview",
-      artist: lyricsButton.dataset.artist || "Unknown Artist"
-    });
+    const url = buildMusixmatchUrl(artist, title);
+    window.open(url, "_blank", "noopener,noreferrer");
   });
 
   el.btnPrevTrack?.addEventListener("click", async () => {
@@ -2258,6 +2148,42 @@ function wireStaticEvents() {
       setStatus(error?.message || "Could not go to next track.");
     } finally {
       setTransportBusy(false);
+    }
+  });
+
+  el.nowPlayingSeekTrack?.addEventListener("click", async (event) => {
+    if (!currentNowPlayingTrack || currentPlaybackDurationMs <= 0) return;
+
+    try {
+      const rect = el.nowPlayingSeekTrack.getBoundingClientRect();
+      const clickPosition = event.clientX - rect.left;
+      const percent = rect.width > 0 ? Math.max(0, Math.min(1, clickPosition / rect.width)) : 0;
+      const nextProgressMs = Math.floor(currentPlaybackDurationMs * percent);
+
+      updatePlaybackProgressUI(nextProgressMs, currentPlaybackDurationMs);
+      await seekPlayback(nextProgressMs);
+      currentPlaybackProgressMs = nextProgressMs;
+      setStatus(`Seeked to ${msToMinSec(nextProgressMs)}.`);
+    } catch (error) {
+      console.error(error);
+      setStatus(error?.message || "Could not seek playback.");
+      await refreshPlayback();
+    }
+  });
+
+  el.nowPlayingVolumeTrack?.addEventListener("click", async (event) => {
+    try {
+      const rect = el.nowPlayingVolumeTrack.getBoundingClientRect();
+      const clickPosition = event.clientX - rect.left;
+      const percent = rect.width > 0 ? Math.max(0, Math.min(100, (clickPosition / rect.width) * 100)) : 0;
+
+      updateVolumeUI(percent);
+      await setPlaybackVolume(percent);
+      setStatus(`Volume set to ${Math.round(percent)}%.`);
+    } catch (error) {
+      console.error(error);
+      setStatus(error?.message || "Could not change playback volume.");
+      await refreshPlayback();
     }
   });
 
