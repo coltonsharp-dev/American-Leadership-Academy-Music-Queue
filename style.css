@@ -1163,7 +1163,7 @@ body.mod-panel-open {
 
 .mod-overlay-header {
   flex-shrink: 0;
-  padding: 14px 22px;
+  padding: 16px 24px;
   border-bottom: 1px solid var(--border);
   background: rgba(15, 20, 32, 0.96);
   backdrop-filter: blur(18px);
@@ -1171,27 +1171,44 @@ body.mod-panel-open {
 
 .mod-overlay-title-row {
   display: flex;
-  align-items: center;
-  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
   flex-wrap: wrap;
+}
+
+.mod-header-actions {
+  gap: 10px;
+  justify-content: flex-end;
+  align-content: flex-start;
 }
 
 .mod-overlay-body {
   flex: 1;
   overflow: hidden;
-  padding: 18px 22px;
+  padding: 20px 24px 24px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 20px;
   min-height: 0;
 }
 
 .mod-top-search-card {
   flex-shrink: 0;
+  padding: 22px;
+}
+
+.mod-top-search-card .search-controls {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+}
+
+.mod-top-search-card .btn {
+  min-height: 44px;
 }
 
 .search-card #manualSearchResults {
-  max-height: 280px;
+  max-height: 240px;
   overflow-y: auto;
   padding-right: 4px;
 }
@@ -1199,8 +1216,8 @@ body.mod-panel-open {
 .mod-grid {
   flex: 1;
   display: grid;
-  grid-template-columns: 1.55fr 1fr;
-  gap: 18px;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.1fr);
+  gap: 20px;
   align-items: stretch;
   min-height: 0;
 }
@@ -1209,14 +1226,34 @@ body.mod-panel-open {
   overflow-y: auto;
   overflow-x: hidden;
   min-height: 0;
+  padding: 22px;
 }
 
 .mod-right-stack {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 20px;
   overflow-y: auto;
   min-height: 0;
+}
+
+.mod-right-stack .approved-card {
+  min-height: 420px;
+  padding: 22px;
+}
+
+.mod-right-stack .up-next-card {
+  min-height: 320px;
+  padding: 20px;
+}
+
+#approvedQueueList {
+  min-height: 260px;
+  align-content: start;
+}
+
+.approved-preview-large {
+  min-height: 180px;
 }
 
 /* LYRICS MODAL */
@@ -1371,6 +1408,11 @@ body.mod-panel-open {
     align-items: start;
   }
 
+  .mod-right-stack {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
   .mod-overlay .requests-card,
   .mod-right-stack {
     overflow-y: visible;
@@ -1413,6 +1455,28 @@ body.mod-panel-open {
 
   .search-controls {
     grid-template-columns: 1fr;
+  }
+
+  .mod-overlay-header,
+  .mod-overlay-body {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .mod-header-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .mod-right-stack .approved-card,
+  .mod-right-stack .up-next-card,
+  .mod-overlay .requests-card,
+  .mod-top-search-card {
+    padding: 16px;
+  }
+
+  #approvedQueueList {
+    min-height: 220px;
   }
 
   .media-card {
@@ -1469,7 +1533,7 @@ body.mod-panel-open {
   }
 
   .approved-preview-large {
-    min-height: 200px;
+    min-height: 160px;
   }
 }
 

@@ -277,9 +277,28 @@
         </section>
 
         <div class="mod-right-stack">
+          <!-- APPROVED QUEUE -->
+          <section class="card approved-card neon-card mod-priority-card">
+            <div class="section-heading">
+              <div>
+                <p class="section-kicker">Moderator Queue</p>
+                <h2>Approved Songs</h2>
+              </div>
+
+              <div class="queue-nav">
+                <button id="btnRemoveAllApproved" class="btn btn-small" type="button">
+                  Remove All
+                </button>
+              </div>
+            </div>
+
+            <div id="approvedQueueList" class="queue-list">
+              <div class="empty-state">No approved songs yet.</div>
+            </div>
+          </section>
 
           <!-- APPROVAL PREVIEW -->
-          <section class="card up-next-card neon-card up-next-card-expanded">
+          <section class="card up-next-card neon-card">
             <div class="card-accent card-accent-violet"></div>
 
             <div class="section-heading">
@@ -302,26 +321,6 @@
             </div>
 
             <div id="approvedPreviewTable" class="requests-list approved-preview-large">
-              <div class="empty-state">No approved songs yet.</div>
-            </div>
-          </section>
-
-          <!-- APPROVED QUEUE -->
-          <section class="card approved-card neon-card">
-            <div class="section-heading">
-              <div>
-                <p class="section-kicker">Moderator Queue</p>
-                <h2>Approved Songs</h2>
-              </div>
-
-              <div class="queue-nav">
-                <button id="btnRemoveAllApproved" class="btn btn-small" type="button">
-                  Remove All
-                </button>
-              </div>
-            </div>
-
-            <div id="approvedQueueList" class="queue-list">
               <div class="empty-state">No approved songs yet.</div>
             </div>
           </section>
