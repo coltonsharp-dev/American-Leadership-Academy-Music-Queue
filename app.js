@@ -17,8 +17,8 @@ const CONFIG = {
   clientId: "cbfd828db1414a2183039d01ceeaf181",
   redirectUriFallback: "https://coltonsharp-dev.github.io/American-Leadership-Academy-Music-Queue/",
   defaultPlaylistId: "3dcGJ6miJHVxZkQEIwGog5",
-  slowPlaylistId: "3dcGJ6miJHVxZkQEIwGog5",
-  funPlaylistId: "3dcGJ6miJHVxZkQEIwGog5",
+  slowPlaylistId: "36GLC9OyT3WQ8YA2yBQhFJ",
+  funPlaylistId: "0hVO11nm205QK7BCfLyXNh",
   requestsCsvUrl:
     "https://docs.google.com/spreadsheets/d/e/2PACX-1vQyc3RRDmjc-nN-XgMMDocbnn1tlxue5ynNoNnYSxnRKxgp2LRGNmYZXnVgAFLH7IViwTAtmIAkvDsK/pub?output=csv",
   scopes: [
